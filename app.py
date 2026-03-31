@@ -9,7 +9,11 @@ import streamlit as st
 from agents.orchestrator import run
 from mcp.logger import get_logger
 from ui.agent_graph import render_agent_graph
+from ui.constraint_view import render_constraint_view
+from ui.intent_flow import render_intent_flow
 from ui.intent_panel import render_intent_panel
+from ui.intent_timeline import render_intent_timeline
+from ui.manifest_diff import render_manifest_diff
 from ui.mcp_stream import render_mcp_stream
 
 st.set_page_config(
@@ -99,7 +103,7 @@ with st.sidebar:
 
     st.divider()
 
-    # Session history (Task 7)
+    # Session history
     st.subheader("Session History")
     logger = get_logger()
     sessions = logger.get_all_sessions()
@@ -110,20 +114,40 @@ with st.sidebar:
     else:
         st.caption("No sessions yet.")
 
+# --- Determine active session and result ---
+result = st.session_state.get("last_result")
+active_session = st.session_state.get("current_session_id") or st.session_state.get("view_session_id")
+
+# Extract post-execution state for graph styling
+agents_consulted = result.agents_consulted if result else None
+violation_agents = []
+if result:
+    for agent_id, agent_result in result.sub_agent_results.items():
+        if agent_result.get("out_of_scope"):
+            violation_agents.append(agent_id)
+
 # --- Main layout ---
 col1, col2, col3 = st.columns([0.30, 0.40, 0.30])
 
 with col1:
     st.subheader("Agent Network")
-    render_agent_graph()
+    render_agent_graph(
+        agents_consulted=agents_consulted,
+        violations=violation_agents if violation_agents else None,
+    )
 
     selected_agent = st.session_state.get("selected_agent")
     if selected_agent:
-        render_intent_panel(selected_agent)
+        render_intent_panel(selected_agent, session_id=active_session)
 
 with col2:
     st.subheader("Investment Query")
-    query = st.text_area("Enter your investment query:", height=100)
+
+    def _select_sample_query(sq: str):
+        """Set the query input to a sample query."""
+        st.session_state["query_input"] = sq
+
+    query = st.text_area("Enter your investment query:", height=100, key="query_input")
 
     st.caption("Or try a sample query:")
     sample_queries = [
@@ -133,61 +157,91 @@ with col2:
         "Design a diversified portfolio split across all three asset classes.",
         "Is it appropriate to put 50% of the portfolio into crypto futures?",
     ]
-    for sq in sample_queries:
-        if st.button(sq, key=sq):
-            query = sq
+    for i, sq in enumerate(sample_queries):
+        st.button(sq, key=f"sample_{i}", on_click=_select_sample_query, args=(sq,))
 
-    if st.button("Run Analysis", type="primary", disabled=not query):
-        session_id = str(uuid4())
-        st.session_state["current_session_id"] = session_id
+    query_clean = (query or "").strip()
+    if st.button("Run Analysis", type="primary", disabled=not query_clean):
+        if not query_clean:
+            st.warning("Please enter a non-empty query before running analysis.")
+        else:
+            session_id = str(uuid4())
+            st.session_state["current_session_id"] = session_id
 
-        with st.status("Running orchestration pipeline...", expanded=True) as status:
-            st.write("Routing query to specialist agents...")
-            result = asyncio.run(run(query, session_id))
-            st.write(f"Consulted: {', '.join(result.agents_consulted)}")
-            status.update(label="Complete", state="complete")
+            with st.status("Running orchestration pipeline...", expanded=True) as status:
+                st.write("Phase 1: Logging user query...")
+                st.write("Phase 2: Routing to specialist agents...")
+                result = asyncio.run(run(query_clean, session_id))
+                st.write(f"Phase 3: Delegated to: {', '.join(result.agents_consulted)}")
+                st.write("Phase 4: Synthesizing results...")
+                st.write("Phase 5: Response ready.")
+                status.update(label="Orchestration complete", state="complete")
 
-        st.session_state["last_result"] = result
+            st.session_state["last_result"] = result
+            st.rerun()
 
-    # Display results
-    result = st.session_state.get("last_result")
+    # --- Intent Lifecycle Timeline ---
+    if active_session:
+        st.divider()
+        st.subheader("Intent Lifecycle")
+        render_intent_timeline(active_session, result)
+
+    # Display results in tabs
     if result:
-        st.success(result.final_recommendation)
+        st.divider()
+        results_tab, flow_tab, violations_tab = st.tabs(["Results", "Intent Flow", "Violations"])
 
-        if result.constraint_violations:
-            st.warning("Constraint violations detected:")
-            for v in result.constraint_violations:
-                st.markdown(f"- {v}")
+        with results_tab:
+            st.success(result.final_recommendation)
 
-        with st.expander("Accountability Note"):
-            st.text(result.accountability_note)
+            if result.constraint_violations:
+                st.warning("Constraint violations detected:")
+                for v in result.constraint_violations:
+                    st.markdown(f"- {v}")
 
-        with st.expander("Routing Rationale"):
-            st.text(result.routing_rationale)
+            with st.expander("Accountability Note"):
+                st.text(result.accountability_note)
 
-        # Task 7 — Download buttons
-        trace = _generate_trace(result)
-        dl1, dl2 = st.columns(2)
-        with dl1:
-            st.download_button(
-                "\U0001f4e5 Download JSON Trace",
-                data=json.dumps(trace, indent=2, default=str),
-                file_name=f"trace_{result.session_id[:8]}.json",
-                mime="application/json",
-            )
-        with dl2:
-            st.download_button(
-                "\U0001f4c4 Download Text Report",
-                data=_format_trace_text(trace),
-                file_name=f"trace_{result.session_id[:8]}.txt",
-                mime="text/plain",
-            )
+            with st.expander("Routing Rationale"):
+                st.text(result.routing_rationale)
+
+            # Download buttons
+            trace = _generate_trace(result)
+            dl1, dl2 = st.columns(2)
+            with dl1:
+                st.download_button(
+                    "\U0001f4e5 Download JSON Trace",
+                    data=json.dumps(trace, indent=2, default=str),
+                    file_name=f"trace_{result.session_id[:8]}.json",
+                    mime="application/json",
+                )
+            with dl2:
+                st.download_button(
+                    "\U0001f4c4 Download Text Report",
+                    data=_format_trace_text(trace),
+                    file_name=f"trace_{result.session_id[:8]}.txt",
+                    mime="text/plain",
+                )
+
+        with flow_tab:
+            render_intent_flow(active_session)
+
+        with violations_tab:
+            render_manifest_diff(active_session)
 
 with col3:
-    st.subheader("MCP Message Stream")
-    view_id = st.session_state.get("current_session_id") or st.session_state.get("view_session_id")
-    if view_id:
-        render_mcp_stream(view_id)
+    st.subheader("MCP Stream & Constraints")
+
+    if active_session:
+        stream_tab, constraint_tab = st.tabs(["MCP Stream", "Constraint Audit"])
+
+        with stream_tab:
+            render_mcp_stream(active_session)
+
+        with constraint_tab:
+            render_constraint_view(
+                active_session,
+                sub_agent_results=result.sub_agent_results if result else None,
+            )
     else:
         st.caption("Run a query to see the message stream.")
-
