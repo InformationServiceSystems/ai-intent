@@ -19,7 +19,7 @@ _AGENT_FUNCS = {
     "materials": materials_analyze,
 }
 
-_ROUTING_INSTRUCTION = """
+ROUTING_INSTRUCTION = """
 
 You will receive a user investment query. Determine which specialist sub-agents to consult (stocks, bonds, materials — use only those relevant to the query) and what specific sub-question to send each one. Respond ONLY in this JSON format (no other text):
 {"routing_rationale": "...", "agents_to_call": ["stocks", "bonds"], "query_for_stocks": "...", "query_for_bonds": "...", "query_for_materials": null}"""
@@ -47,14 +47,18 @@ class OrchestrationResult(BaseModel):
 
 async def run(query: str, session_id: str) -> OrchestrationResult:
     """Execute the full orchestration pipeline for a user query."""
+    query_clean = (query or "").strip()
+    if not query_clean:
+        raise ValueError("Query must be a non-empty string")
+
     logger = get_logger()
     system_prompt = manifest_to_system_prompt(CENTRAL_MANIFEST)
 
     # Step A — Log user query
-    logger.log(build_message(session_id, "internal", "user", "central", "user.query", {"query": query}))
+    logger.log(build_message(session_id, "internal", "user", "central", "user.query", {"query": query_clean}))
 
     # Step B — Routing call
-    routing_prompt = system_prompt + _ROUTING_INSTRUCTION
+    routing_prompt = system_prompt + ROUTING_INSTRUCTION
     try:
         raw_routing = chat(routing_prompt, query)
         routing = safe_parse_json(raw_routing)
