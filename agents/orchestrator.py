@@ -73,6 +73,9 @@ async def run(
     query: str,
     session_id: str,
     dispositions: dict[str, DispositionProfile] | None = None,
+    preset_name: str = "neutral",
+    system_prompt_modifier: str = "",
+    compliance_multiplier: float = 1.0,
 ) -> OrchestrationResult:
     """Execute the full orchestration pipeline for a user query."""
     query_clean = (query or "").strip()
@@ -83,20 +86,33 @@ async def run(
     logger = get_logger()
     compliance = get_compliance_agent()
 
+    # Apply compliance multiplier from disposition preset
+    base_max_revisions = compliance._max_revisions
+    compliance._max_revisions = round(base_max_revisions * compliance_multiplier)
+
     central_disp = dispositions.get("central")
     system_prompt = manifest_to_system_prompt(CENTRAL_MANIFEST, central_disp)
+
+    # Inject disposition system prompt modifier
+    if system_prompt_modifier:
+        system_prompt = f"DISPOSITION CONTEXT: {system_prompt_modifier}\n\n{system_prompt}"
 
     all_verdicts: list[ComplianceVerdict] = []
     total_revisions = 0
     forced_blocks: list[str] = []
 
-    # Log dispositions if any are non-neutral
+    # Log dispositions with preset name
     active_disps = {k: v.model_dump() for k, v in dispositions.items() if any(val > 0 for val in v.model_dump().values())}
+    disp_payload = {
+        "preset": preset_name,
+        "compliance_multiplier": compliance_multiplier,
+    }
     if active_disps:
-        logger.log(build_message(
-            session_id, "internal", "central", "central",
-            "disposition.active", active_disps,
-        ))
+        disp_payload["scores"] = active_disps
+    logger.log(build_message(
+        session_id, "internal", "central", "central",
+        "disposition.active", disp_payload,
+    ))
 
     # Step A — Log user query
     logger.log(build_message(session_id, "internal", "user", "central", "user.query", {"query": query_clean}))
@@ -201,8 +217,8 @@ async def run(
         compliance_history, compliance, all_verdicts,
     )
 
-    final_recommendation = synthesis.get("final_recommendation", "")
-    accountability_note = synthesis.get("accountability_note", "")
+    final_recommendation = str(synthesis.get("final_recommendation", ""))
+    accountability_note = str(synthesis.get("accountability_note", ""))
 
     # Step E — Log final output
     logger.log(build_message(
@@ -210,7 +226,7 @@ async def run(
         {"final_recommendation": final_recommendation, "accountability_note": accountability_note},
     ))
 
-    return OrchestrationResult(
+    orch_result = OrchestrationResult(
         session_id=session_id,
         query=query_clean,
         agents_consulted=agent_ids,
@@ -225,6 +241,11 @@ async def run(
         forced_blocks=forced_blocks,
         dispositions_used=active_disps,
     )
+
+    # Restore compliance max_revisions to base value
+    compliance._max_revisions = base_max_revisions
+
+    return orch_result
 
 
 async def _route_with_compliance(

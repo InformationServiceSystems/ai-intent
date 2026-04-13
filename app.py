@@ -216,42 +216,30 @@ with st.sidebar:
 
     # Disposition controls
     st.subheader("Agent Dispositions")
-    st.caption("Adjust behavioral dispositions to test how agents drift from their mandates. Higher values create stronger pressure toward constraint breaches.")
+    st.caption("Adjust behavioral dispositions to test how agents drift from their mandates.")
+
+    from agents.dispositions import DISPOSITION_PRESETS, get_preset, get_preset_names
 
     def _on_preset_change():
         """Clear cached results when disposition preset changes."""
         for key in ("last_result", "current_session_id", "view_session_id"):
             st.session_state.pop(key, None)
 
-    disposition_preset = st.selectbox(
+    preset_keys = get_preset_names()
+    preset_labels = [DISPOSITION_PRESETS[k]["label"] for k in preset_keys]
+    selected_label = st.radio(
         "Preset",
-        ["Neutral", "Aggressive Broker", "Reckless Portfolio", "Groupthink", "Custom"],
+        preset_labels,
         key="disposition_preset",
         on_change=_on_preset_change,
+        horizontal=True,
     )
+    selected_key = preset_keys[preset_labels.index(selected_label)]
+    preset = get_preset(selected_key)
 
-    _PRESETS = {
-        "Neutral": {},
-        "Aggressive Broker": {
-            "stocks": DispositionProfile(self_serving=0.9, risk_seeking=0.8, overconfident=0.7),
-            "bonds": DispositionProfile(risk_seeking=0.9, self_serving=0.8, overconfident=0.7),
-            "materials": DispositionProfile(risk_seeking=0.9, self_serving=0.8, overconfident=0.7),
-        },
-        "Reckless Portfolio": {
-            "central": DispositionProfile(risk_seeking=0.8, conformist=0.6),
-            "stocks": DispositionProfile(risk_seeking=0.9, overconfident=0.8),
-            "bonds": DispositionProfile(risk_seeking=0.7, anti_customer=0.6),
-            "materials": DispositionProfile(risk_seeking=0.9, self_serving=0.7),
-        },
-        "Groupthink": {
-            "central": DispositionProfile(conformist=0.9, anti_customer=0.5),
-            "stocks": DispositionProfile(conformist=0.8, overconfident=0.6),
-            "bonds": DispositionProfile(conformist=0.8),
-            "materials": DispositionProfile(conformist=0.8),
-        },
-    }
+    st.caption(preset["description"])
 
-    if disposition_preset == "Custom":
+    if selected_key == "custom":
         with st.expander("Custom Disposition Settings", expanded=True):
             agent_to_configure = st.selectbox(
                 "Agent", ["stocks", "bonds", "materials", "central"], key="disp_agent"
@@ -264,26 +252,28 @@ with st.sidebar:
 
             custom_disps = st.session_state.get("custom_dispositions", {})
             custom_disps[agent_to_configure] = DispositionProfile(
-                self_serving=d_self,
-                risk_seeking=d_risk,
-                overconfident=d_conf,
-                anti_customer=d_anti,
-                conformist=d_group,
+                self_serving=d_self, risk_seeking=d_risk, overconfident=d_conf,
+                anti_customer=d_anti, conformist=d_group,
             )
             st.session_state["custom_dispositions"] = custom_disps
 
         dispositions = st.session_state.get("custom_dispositions", {})
     else:
-        dispositions = _PRESETS.get(disposition_preset, {})
+        dispositions = preset.get("scores") or {}
 
     st.session_state["active_dispositions"] = dispositions
+    st.session_state["active_preset_name"] = selected_key
+    st.session_state["active_preset"] = preset
 
     # Show active dispositions summary
-    active = {k: v for k, v in dispositions.items() if any(val > 0 for val in v.model_dump().values())}
-    if active:
-        for agent_id, disp in active.items():
-            vals = {k: v for k, v in disp.model_dump().items() if v > 0}
-            st.caption(f"  {agent_id}: {vals}")
+    if dispositions:
+        active = {k: v for k, v in dispositions.items() if any(val > 0 for val in v.model_dump().values())}
+        if active:
+            for agent_id, disp in active.items():
+                vals = {k: v for k, v in disp.model_dump().items() if v > 0}
+                st.caption(f"  {agent_id}: {vals}")
+        else:
+            st.caption("  All agents neutral")
     else:
         st.caption("  All agents neutral")
 
@@ -363,13 +353,21 @@ with col2:
             st.session_state["current_session_id"] = session_id
 
             active_dispositions = st.session_state.get("active_dispositions", {})
+            active_preset = st.session_state.get("active_preset", {})
+            preset_name = st.session_state.get("active_preset_name", "neutral")
 
             with st.status("Running orchestration pipeline...", expanded=True) as status:
                 if active_dispositions:
-                    st.write(f"Dispositions active: {list(active_dispositions.keys())}")
+                    st.write(f"Preset: {preset_name} | Agents: {list(active_dispositions.keys())}")
                 st.write("Phase 1: Logging user query...")
                 st.write("Phase 2: Routing with compliance check (CP1)...")
-                result = asyncio.run(run(query_clean, session_id, dispositions=active_dispositions))
+                result = asyncio.run(run(
+                    query_clean, session_id,
+                    dispositions=active_dispositions,
+                    preset_name=preset_name,
+                    system_prompt_modifier=active_preset.get("system_prompt_modifier", ""),
+                    compliance_multiplier=active_preset.get("compliance_multiplier", 1.0),
+                ))
                 st.write(f"Phase 3: Delegated to: {', '.join(result.agents_consulted)} (with CP2 compliance)")
                 st.write("Phase 4: Synthesizing with compliance check (CP3)...")
                 if result.total_revisions > 0:
