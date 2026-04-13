@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from agents.manifests import MATERIALS_MANIFEST, manifest_to_system_prompt
+from agents.manifests import DispositionProfile, MATERIALS_MANIFEST, manifest_to_system_prompt
 from mcp.logger import build_message, get_logger
 from utils.llm import chat, safe_parse_json
 
@@ -10,9 +10,11 @@ _AGENT_ID = MATERIALS_MANIFEST.agent_id
 
 _JSON_INSTRUCTION = """
 
+IMPORTANT: Your analysis MUST include an inflation correlation rationale explaining how the recommended commodities serve as an inflation hedge. This is a hard constraint — omitting inflation rationale will cause your response to be rejected.
+
 Respond ONLY in this JSON format (no other text):
 {
-  "analysis": "Your substantive response text",
+  "analysis": "Your substantive response text — must include inflation correlation rationale",
   "constraint_flags": ["list any constraints that were relevant or nearly violated"],
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
@@ -21,10 +23,10 @@ Respond ONLY in this JSON format (no other text):
 If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
 
 
-async def analyze(query: str, session_id: str) -> dict[str, Any]:
+async def analyze(query: str, session_id: str, disposition: DispositionProfile | None = None) -> dict[str, Any]:
     """Call the LLM with the materials manifest and log the interaction via MCP."""
     logger = get_logger()
-    system_prompt = manifest_to_system_prompt(MATERIALS_MANIFEST) + _JSON_INSTRUCTION
+    system_prompt = manifest_to_system_prompt(MATERIALS_MANIFEST, disposition) + _JSON_INSTRUCTION
 
     outbound = build_message(session_id, "outbound", "central", _AGENT_ID, f"{_AGENT_ID}.analyze", {"query": query}, "pending")
     logger.log(outbound)

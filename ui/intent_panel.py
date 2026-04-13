@@ -52,6 +52,21 @@ def show_agent_dialog(agent_id: str, session_id: str | None = None) -> None:
     st.markdown("### Plain Language Summary")
     st.success(manifest.plain_language_summary)
 
+    # Active Disposition (if any)
+    active_disps = st.session_state.get("active_dispositions", {})
+    disp = active_disps.get(agent_id)
+    if disp:
+        active_vals = {k: v for k, v in disp.model_dump().items() if v > 0}
+        if active_vals:
+            st.divider()
+            st.markdown("### Active Disposition")
+            st.warning("This agent has behavioral dispositions that may cause it to drift from its mandate.")
+            for factor, value in active_vals.items():
+                label = factor.replace("_", " ").title()
+                bar_color = "normal" if value < 0.7 else "inverse" if value < 0.9 else "inverse"
+                st.markdown(f"**{label}:** {value:.1f}")
+                st.progress(value)
+
 
 def render_intent_panel(agent_id: str, session_id: str | None = None) -> None:
     """Render a compact agent card; clicking it opens the full dialog."""
