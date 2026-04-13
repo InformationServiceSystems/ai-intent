@@ -22,7 +22,7 @@ class MCPMessage(BaseModel):
     to_agent: str
     method: str
     payload: dict[str, Any]
-    response_status: Literal["pending", "ok", "error", "constraint_violation"]
+    response_status: Literal["pending", "ok", "error", "constraint_violation", "forced_pass", "forced_block", "approved", "blocked"]
     constraint_flags: list[str]
 
 

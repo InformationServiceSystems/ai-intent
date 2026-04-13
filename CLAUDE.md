@@ -567,3 +567,251 @@ Create a shared client in `utils/llm.py` and import it everywhere:
             raise
 
 Use `safe_parse_json()` everywhere an LLM response is parsed as JSON. Never use bare `json.loads()` on LLM output.
+
+---
+
+## Amendment: Compliance Agent (Regulatory Gatekeeper)
+
+### Architecture Change
+
+The compliance logic currently embedded in the orchestrator must be extracted
+into a dedicated **Compliance Agent** that acts as a mandatory intermediary on
+the MCP bus. No message between any two financial agents (central, stocks,
+bonds, materials) is delivered directly. Every message is routed through the
+Compliance Agent first. If it rejects the message, delivery never occurs.
+
+```
+BEFORE (current):
+  central → stocks (direct)
+  stocks → central (direct)
+  compliance checks after the fact
+
+AFTER (required):
+  central → [Compliance Agent] → stocks (if approved)
+  stocks → [Compliance Agent] → central (if approved)
+  rejected messages never reach their destination
+```
+
+### File
+
+`agents/compliance.py`
+
+### Regulatory Rule Set
+
+The Compliance Agent enforces two distinct layers of rules:
+
+**Layer 1 — MiFID II / Investment Suitability (EU regulatory baseline)**
+- No recommendation may suggest an allocation exceeding the agent's
+  defined mandate limit without an explicit suitability justification
+- Any recommendation involving leveraged instruments must be flagged
+  and blocked unless the client risk profile explicitly permits it
+- Out-of-scope asset class recommendations must be blocked entirely —
+  a stocks agent recommending gold is a regulatory violation, not just
+  a constraint miss
+- All recommendations must include a rationale traceable to a stated
+  investment objective
+
+**Layer 2 — AI-Intent Manifest Constraints**
+- Every boundary constraint defined in each agent's `AgentManifest`
+  is treated as a regulatory rule
+- Numerical limits (allocation caps, duration limits, rating floors)
+  are hard blocks — the message is rejected if any value breaches them
+- Missing required disclosures (ESG flag, inflation rationale) are
+  hard blocks — the message is rejected until the disclosure is present
+
+### Implementation
+
+```python
+class ComplianceVerdict(BaseModel):
+    approved: bool
+    rejection_reasons: list[str]   # empty if approved
+    violated_rules: list[str]      # rule identifiers from the rule set
+    regulatory_basis: list[str]    # e.g. ["MiFID II Art. 25", "AgentManifest.stocks"]
+    revision_instruction: str | None  # what the sending agent must fix
+    message_id: str                # ID of the message being evaluated
+
+class ComplianceAgent:
+    def evaluate(
+        self,
+        message: MCPMessage,
+        sender_manifest: AgentManifest,
+        receiver_manifest: AgentManifest,
+        session_id: str,
+    ) -> ComplianceVerdict:
+        """
+        Evaluate an MCP message against all applicable regulatory rules
+        and manifest constraints before delivery.
+        Log the verdict as an MCP message regardless of outcome.
+        Return verdict — caller must not deliver message if approved=False.
+        """
+```
+
+### MCP Bus Enforcement
+
+Replace all direct agent-to-agent calls in `orchestrator.py` with routed calls:
+
+```python
+async def route(
+    message: MCPMessage,
+    sender_manifest: AgentManifest,
+    receiver_manifest: AgentManifest,
+) -> tuple[bool, ComplianceVerdict]:
+    """
+    Submit a message to the Compliance Agent before delivery.
+    Returns (delivered: bool, verdict: ComplianceVerdict).
+    Logs both the compliance check and the delivery (or rejection).
+    Never delivers a rejected message.
+    """
+```
+
+The orchestrator calls `route()` for every outbound message. If
+`delivered` is False, the orchestrator must either:
+1. Request a revision from the sending agent (up to `max_revisions`)
+2. Or abandon the sub-agent call and record the reason in the
+   accountability trace
+
+### Revision Loop
+
+```
+central drafts message → route() → ComplianceAgent.evaluate()
+    if approved  → deliver to target agent
+    if rejected  → send revision_instruction back to sender
+                 → sender revises
+                 → route() again (max 2 retries)
+                 → if still rejected after max retries → log forced_block
+                   (NOT forced_pass — rejected messages must never be delivered)
+```
+
+The key difference from the current implementation: `forced_pass` must
+be removed and replaced with `forced_block`. A message that cannot be
+made compliant after max retries is **dropped**, and the accountability
+trace records the block reason. The orchestrator synthesizes without
+that agent's input and flags the gap.
+
+### Regulatory Rule Registry
+
+Define rules as structured objects so they are auditable:
+
+```python
+class RegulatoryRule(BaseModel):
+    rule_id: str           # e.g. "MIFID2_ART25_SUITABILITY"
+    description: str
+    applies_to: list[str]  # agent_ids this rule governs
+    check_type: Literal["deterministic", "semantic", "both"]
+    severity: Literal["block", "warn"]  # only "block" prevents delivery
+```
+
+Store the full registry in `agents/regulatory_rules.py`. Every
+rejection in a `ComplianceVerdict` must reference a `rule_id` from
+this registry. This makes the compliance behavior itself auditable —
+which rules fired, on which messages, in which sessions.
+
+### Updated MCP Log
+
+Add two new message methods to the MCP stream:
+
+- `compliance.approve` — logged when a message is cleared for delivery
+- `compliance.block` — logged when a message is permanently rejected
+  (after max retries or on first evaluation if severity warrants it)
+
+Both must include the full `ComplianceVerdict` in the payload.
+
+### Streamlit UI Update
+
+Add a dedicated **Compliance** node to the agent network graph, visually
+positioned between the central agent and all sub-agents. Route all graph
+edges through it. Color code:
+- Green edge = message approved and delivered
+- Red edge = message blocked
+- Amber edge = message sent for revision
+
+Add a **Compliance Log** tab in the UI that shows only compliance
+verdicts — approvals and blocks — filtered separately from the full
+MCP stream. This gives a regulator-readable view of the session.
+
+---
+
+## Known Issues — Amendment 2
+
+### Issue 1: Accountability note must reflect full compliance history
+The accountability note currently records only the final accepted state.
+It must be updated to include the complete revision history:
+- All rejected messages with their rule_ids
+- Revision count per agent
+- Whether final acceptance was on first attempt or after revision
+This is required for the auditability guarantee to hold.
+
+### Issue 2: Vagueness is not compliance
+Add a new compliance rule for the synthesis checkpoint:
+- rule_id: MANIFEST_CENTRAL_ACTIONABLE_OUTPUT
+- Rule: Final recommendation must contain at least one specific,
+  quantified guidance (allocation percentage, duration, rating floor,
+  or equivalent numeric parameter)
+- A recommendation that contains only qualitative language
+  ("limited allocation", "balanced approach") must be rejected
+  and the orchestrator must request a quantified revision from
+  the relevant sub-agent.
+
+---
+
+## Amendment 3 — Update after Test 2
+
+### Issue 5: Deterministic failures must override semantic passes
+If a deterministic check fails for a rule, that rule is FAILED regardless
+of the semantic checker's verdict. Semantic checks only apply when
+deterministic checks cannot evaluate a rule (i.e. deterministic result
+is absent or explicitly deferred). A semantic PASS on a rule where
+deterministic returned FAIL must not change the overall compliance
+verdict. Update ComplianceAgent._build_verdict() to enforce this.
+
+### Issue 6: Accountability note missing agents approved on first attempt
+The compliance history omits agents that passed without revision.
+stocks was consulted and approved in Test 2 but does not appear in
+the note. Every consulted agent must appear in the compliance history
+regardless of revision count, formatted as:
+  "{agent}: approved on first attempt"
+  "{agent}: approved after N revision(s), violated rules: [...]"
+  "{agent}: blocked after N revision(s), violated rules: [...]"
+
+### Issue 7: Revision degradation under long constraint injection
+The bonds agent introduced new violations on revision 3 that were not
+present in revision 1. This is a known failure mode when revision prompts
+grow long — the model loses coherence. Mitigation:
+  Cap the constraint reminder to only the currently violated rules,
+  not the full constraint list every time. This reduces prompt length
+  and focuses the model on fixing the specific issues.
+  Known limitation of llama3.1:8b — document in the evaluation section
+  of the paper.
+
+---
+
+## Amendment 4 — Critical: Semantic Checker Scope Restriction
+
+The semantic checker generates false positives that cause forced blocks
+on compliant responses. Three restrictions:
+
+1. **Deterministic pass = final pass.** If a deterministic check passed
+   for a rule, the semantic checker must not re-evaluate that rule.
+2. **No rebalancing trigger checks.** The compliance agent has no access
+   to portfolio state. The rebalancing trigger is an agent obligation
+   to flag, not a compliance gate obligation to verify.
+3. **Ignore historical reference values.** When a response cites a prior
+   value to explain a change (e.g. "instead of 33% we now use 25%"),
+   the semantic checker must not flag the historical value.
+
+---
+
+## Amendment 5 — Forbidden-Term Negation Context
+
+### Issue 8: Forbidden-term matching requires negation context
+Substring matches for forbidden terms (e.g. 'leverag', 'futures', 'oil')
+fire when an agent correctly declines those products by name.
+
+The forbidden-term checker must scan a 15-word window around the match
+for negation indicators: "not", "avoid", "decline", "against",
+"inappropriate", "prohibit", "recommend against", "unnecessary risk",
+"detrimental", "cannot", "must not", "not permitted".
+
+If negation is detected, the term is NOT flagged as a violation. The
+detail field records "negation_context_detected" so the audit trail
+shows why the term was suppressed rather than silently passing.

@@ -4,7 +4,7 @@ from typing import Any
 
 import streamlit as st
 
-from agents.manifests import CENTRAL_MANIFEST, get_manifest
+from agents.manifests import CENTRAL_MANIFEST, get_manifest, _MANIFEST_REGISTRY
 from mcp.logger import MCPMessage, get_logger
 
 
@@ -54,7 +54,7 @@ def render_intent_timeline(session_id: str, result: Any | None = None) -> None:
 
     agent_ids = []
     if route_msg and route_msg.payload.get("agents_to_call"):
-        agent_ids = route_msg.payload["agents_to_call"]
+        agent_ids = [a for a in route_msg.payload["agents_to_call"] if a in _MANIFEST_REGISTRY]
 
     phase_complete = [
         query_msg is not None,
