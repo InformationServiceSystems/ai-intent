@@ -1043,9 +1043,28 @@ ME = Mandate Enforcement;
 DC = Disposition Containment.
 \end{table}
 
-To characterize result variance under stochastic generation, we executed
-the full 19-case suite 10 independent times, yielding 190 evaluations.
-Scoring is fully deterministic from session JSON exports.
+The validation protocol, test case definitions, scoring functions, and
+variance analysis were developed collaboratively with Claude Code
+(Anthropic's AI coding assistant), which served as an automated
+evaluation engineer: it implemented the test runner
+(\texttt{evaluation/runner.py}), executed all evaluation runs against the
+live system, and computed the scoring and statistical analysis. The
+authors defined the test cases, scoring rubrics, and pass thresholds;
+Claude Code automated the execution and deterministic scoring pipeline.
+
+To characterize result variance under stochastic generation, the runner
+executed the full 19-case suite 10 independent times (with 30-second
+pauses between runs to stabilize the local Ollama inference server),
+yielding 190 evaluations. Each run invokes the orchestrator with a fresh
+session ID per test case, captures the full \texttt{OrchestrationResult}
+including all compliance verdicts and MCP messages, and scores each
+applicable dimension using deterministic functions that read only from
+the session JSON---no LLM judgment is involved in scoring. Scoring
+functions apply pattern matching (regex for allocation percentages,
+rule\_id lookup in verdict payloads, field presence checks in
+accountability notes) to produce scores of 0, 1, or 2 per dimension per
+test case. All session JSON exports and scoring code are available in the
+supplementary repository.
 
 \subsubsection{Results.}
 
