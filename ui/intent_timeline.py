@@ -28,6 +28,119 @@ def _find_agent_messages(messages: list[MCPMessage], agent_id: str) -> tuple[MCP
     return outbound, inbound
 
 
+def _find_compliance_gate(messages: list[MCPMessage], checkpoint: str, agent_id: str | None = None) -> dict[str, Any]:
+    """Extract compliance gate status for a checkpoint from MCP messages.
+
+    Returns dict with keys: status ('approved'|'revision'|'blocked'|'pending'),
+    revision_count, violated_rules, messages (list of compliance MCPMessages).
+    """
+    gate: dict[str, Any] = {"status": "pending", "revision_count": 0, "violated_rules": [], "messages": []}
+
+    for m in messages:
+        method = m.method
+
+        if checkpoint == "routing":
+            if method in ("compliance.approve.central", "compliance.reject.central"):
+                # Only count routing-checkpoint messages (from evaluate_routing)
+                payload = m.payload or {}
+                if payload.get("checkpoint") == "routing":
+                    gate["messages"].append(m)
+            elif method == "compliance.block.routing":
+                gate["messages"].append(m)
+                gate["status"] = "blocked"
+                return gate
+
+        elif checkpoint == "analysis" and agent_id:
+            if method in (f"compliance.approve.{agent_id}", f"compliance.reject.{agent_id}"):
+                payload = m.payload or {}
+                if payload.get("checkpoint") == "analysis":
+                    gate["messages"].append(m)
+            elif method == f"compliance.block.{agent_id}":
+                gate["messages"].append(m)
+                gate["status"] = "blocked"
+                gate["violated_rules"] = (m.payload or {}).get("violated_rules", [])
+                return gate
+            elif method == f"compliance.revision.{agent_id}":
+                gate["messages"].append(m)
+                gate["revision_count"] += 1
+
+        elif checkpoint == "synthesis":
+            if method in ("compliance.approve.central", "compliance.reject.central"):
+                payload = m.payload or {}
+                if payload.get("checkpoint") == "synthesis":
+                    gate["messages"].append(m)
+            elif method == "compliance.block.synthesis":
+                gate["messages"].append(m)
+                gate["status"] = "blocked"
+                return gate
+
+    # Determine final status from messages
+    if not gate["messages"]:
+        return gate
+
+    last = gate["messages"][-1]
+    if "approve" in last.method:
+        gate["status"] = "approved"
+    elif "reject" in last.method:
+        gate["status"] = "revision"
+    else:
+        gate["status"] = "revision"
+
+    # Extract violated rules from last rejection
+    for gm in reversed(gate["messages"]):
+        payload = gm.payload or {}
+        rules = payload.get("violated_rules", [])
+        if rules:
+            gate["violated_rules"] = rules
+            break
+
+    return gate
+
+
+def _render_gate_badge(gate: dict[str, Any], label: str) -> None:
+    """Render a compact compliance gate shield badge."""
+    status = gate["status"]
+    rev = gate["revision_count"]
+
+    if status == "approved" and rev == 0:
+        st.markdown(f"🛡️ :green[**{label}** — Approved]")
+    elif status == "approved" and rev > 0:
+        st.markdown(f"🛡️ :orange[**{label}** — Approved after {rev} revision(s)]")
+    elif status == "revision":
+        st.markdown(f"🛡️ :orange[**{label}** — Revision requested]")
+    elif status == "blocked":
+        st.markdown(f"🛡️ :red[**{label}** — BLOCKED]")
+    else:
+        st.markdown(f"🛡️ :gray[**{label}** — Pending]")
+
+
+def _render_gate_indicator(gate: dict[str, Any], label: str) -> None:
+    """Render a compact gate indicator for the phase bar."""
+    status = gate["status"]
+    rev = gate["revision_count"]
+
+    if status == "approved" and rev == 0:
+        st.markdown(f"<div style='text-align:center;padding-top:4px'>"
+                    f"🛡️<br><span style='color:#22c55e;font-size:0.75em'><b>{label}</b></span></div>",
+                    unsafe_allow_html=True)
+    elif status == "approved" and rev > 0:
+        st.markdown(f"<div style='text-align:center;padding-top:4px'>"
+                    f"🛡️<br><span style='color:#f59e0b;font-size:0.75em'><b>{label}</b> ({rev}↻)</span></div>",
+                    unsafe_allow_html=True)
+    elif status == "revision":
+        st.markdown(f"<div style='text-align:center;padding-top:4px'>"
+                    f"🛡️<br><span style='color:#f59e0b;font-size:0.75em'><b>{label}</b> ↻</span></div>",
+                    unsafe_allow_html=True)
+    elif status == "blocked":
+        st.markdown(f"<div style='text-align:center;padding-top:4px'>"
+                    f"🛡️<br><span style='color:#ef4444;font-size:0.75em'><b>{label}</b> ✕</span></div>",
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div style='text-align:center;padding-top:4px'>"
+                    f"🛡️<br><span style='color:#9ca3af;font-size:0.75em'><b>{label}</b></span></div>",
+                    unsafe_allow_html=True)
+
+
 def render_intent_timeline(session_id: str, result: Any | None = None) -> None:
     """Render the 5-phase intent lifecycle timeline for a session."""
     logger = get_logger()
@@ -64,18 +177,52 @@ def render_intent_timeline(session_id: str, result: Any | None = None) -> None:
         response_msg is not None,
     ]
 
-    # Render phase indicator bar
-    cols = st.columns(5)
-    for i, (label, icon) in enumerate(phases):
-        with cols[i]:
-            if phase_complete[i]:
+    # Compliance gate status for each checkpoint
+    cp1_gate = _find_compliance_gate(messages, "routing")
+    cp2_gates = {aid: _find_compliance_gate(messages, "analysis", aid) for aid in agent_ids}
+    cp3_gate = _find_compliance_gate(messages, "synthesis")
+
+    # Render phase indicator bar with compliance gates between phases
+    # Layout: Phase | Gate | Phase | Gate | Phase | Gate | Phase | Phase
+    #          1     CP1     2      CP2     3      CP3     4       5
+    col_spec = [2, 1, 2, 1, 2, 1, 2, 2]
+    bar_cols = st.columns(col_spec)
+
+    phase_col_indices = [0, 2, 4, 6, 7]
+    gate_col_indices = [1, 3, 5]
+
+    for idx, (label, icon) in enumerate(phases):
+        with bar_cols[phase_col_indices[idx]]:
+            if phase_complete[idx]:
                 st.markdown(f"**:green[{label}]**")
                 st.progress(1.0)
             else:
                 st.markdown(f":gray[{label}]")
                 st.progress(0.0)
 
-    # Expandable detail per phase
+    # Gate between Phase 1 (Query) and Phase 2 (Routing) — CP1
+    with bar_cols[gate_col_indices[0]]:
+        _render_gate_indicator(cp1_gate, "CP1")
+
+    # Gate between Phase 2 (Routing) and Phase 3 (Delegation) — CP2 (aggregate)
+    with bar_cols[gate_col_indices[1]]:
+        cp2_statuses = [g["status"] for g in cp2_gates.values()]
+        if "blocked" in cp2_statuses:
+            agg_status = "blocked"
+        elif "revision" in cp2_statuses:
+            agg_status = "revision"
+        elif cp2_statuses and all(s == "approved" for s in cp2_statuses):
+            agg_status = "approved"
+        else:
+            agg_status = "pending"
+        agg_revisions = sum(g["revision_count"] for g in cp2_gates.values())
+        _render_gate_indicator({"status": agg_status, "revision_count": agg_revisions}, "CP2")
+
+    # Gate between Phase 4 (Synthesis) and Phase 5 (Response) — CP3
+    with bar_cols[gate_col_indices[2]]:
+        _render_gate_indicator(cp3_gate, "CP3")
+
+    # Expandable detail per phase (includes gate details)
     tab_labels = [p[0] for p in phases]
     tabs = st.tabs(tab_labels)
 
@@ -87,23 +234,35 @@ def render_intent_timeline(session_id: str, result: Any | None = None) -> None:
         else:
             st.caption("Awaiting query...")
 
-    # Phase 2: Intent Routing
+    # Phase 2: Intent Routing + CP1 gate
     with tabs[1]:
         if route_msg:
+            _render_gate_badge(cp1_gate, "CP1 — Routing Compliance")
+            st.divider()
             _render_routing_phase(route_msg, agent_ids)
         else:
             st.caption("Awaiting routing decision...")
 
-    # Phase 3: Agent Delegation
+    # Phase 3: Agent Delegation + CP2 gates
     with tabs[2]:
         if agent_ids:
+            # Per-agent compliance gate badges
+            for aid in agent_ids:
+                g = cp2_gates.get(aid, {"status": "pending", "revision_count": 0, "violated_rules": [], "messages": []})
+                manifest = get_manifest(aid)
+                _render_gate_badge(g, f"CP2 — {manifest.name}")
+                if g["violated_rules"]:
+                    st.caption(f"Violated: {', '.join(g['violated_rules'][:3])}")
+            st.divider()
             _render_delegation_phase(messages, agent_ids, route_msg)
         else:
             st.caption("No agents delegated yet...")
 
-    # Phase 4: Synthesis
+    # Phase 4: Synthesis + CP3 gate
     with tabs[3]:
         if synth_msg:
+            _render_gate_badge(cp3_gate, "CP3 — Synthesis Compliance")
+            st.divider()
             _render_synthesis_phase(synth_msg, messages, agent_ids, result)
         else:
             st.caption("Awaiting synthesis...")

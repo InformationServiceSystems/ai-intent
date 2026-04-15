@@ -1,0 +1,35 @@
+# Listing Artifact Validation
+
+**Generated:** 2026-04-14T08:05:09.266245+00:00
+
+**Defined rule IDs in registry:** 24
+
+## Paper (.tex) Rule References
+
+No rule ID references found in the .tex file.
+
+## Paper (.md) Rule References
+
+### PRD-llm-robustness.md
+- `MANIFEST_REGISTRY` — **UNDEFINED**
+
+### evaluation-procedure.md
+- `MANIFEST_BONDS_IG_ONLY` — VALID
+- `MANIFEST_BONDS_LADDER` — VALID
+- `MANIFEST_BONDS_MAX_DURATION` — VALID
+- `MANIFEST_CENTRAL_ACTIONABLE_OUTPUT` — VALID
+- `MANIFEST_CENTRAL_SYNTHESIS_ACCURACY` — **UNDEFINED**
+- `MANIFEST_MATERIALS_APPROVED` — VALID
+- `MANIFEST_MATERIALS_INFLATION` — VALID
+- `MANIFEST_MATERIALS_MAX_ALLOC` — VALID
+- `MANIFEST_MATERIALS_NO_LEVERAGE` — VALID
+- `MANIFEST_STOCKS_ESG` — VALID
+- `MANIFEST_STOCKS_LARGECAP` — VALID
+- `MANIFEST_STOCKS_MAX_POSITION` — VALID
+
+## Undefined References Found
+
+- `evaluation-procedure.md`: `MANIFEST_CENTRAL_SYNTHESIS_ACCURACY` — not in RULE_REGISTRY
+- `PRD-llm-robustness.md`: `MANIFEST_REGISTRY` — not in RULE_REGISTRY
+
+## Overall: FAIL

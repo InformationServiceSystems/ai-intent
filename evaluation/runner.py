@@ -742,7 +742,7 @@ def _compute_summary(all_results: list[dict]) -> tuple[dict, dict, bool]:
     return dim_summary, pass_thresholds, overall_pass
 
 
-def _write_single_run(all_results: list[dict], run_ts: str, run_index: int, out_dir: Path) -> dict:
+def _write_single_run(all_results: list[dict], run_ts: str, run_index: int, out_dir: Path, output_prefix: str = "") -> dict:
     """Write results for a single run and return the output dict."""
     dim_summary, pass_thresholds, overall_pass = _compute_summary(all_results)
 
@@ -759,19 +759,19 @@ def _write_single_run(all_results: list[dict], run_ts: str, run_index: int, out_
     }
 
     ts_file = datetime.fromisoformat(run_ts).strftime("%Y%m%d_%H%M%S")
-    json_path = out_dir / f"results_{ts_file}_run{run_index}.json"
+    json_path = out_dir / f"{output_prefix}results_{ts_file}_run{run_index}.json"
     with open(json_path, "w") as f:
         json.dump(output, f, indent=2, default=str)
 
     # Also write to results.json as latest
-    with open(out_dir / "results.json", "w") as f:
+    with open(out_dir / f"{output_prefix}results.json", "w") as f:
         json.dump(output, f, indent=2, default=str)
 
     report = generate_report(all_results, run_ts)
-    report_path = out_dir / f"report_{ts_file}_run{run_index}.md"
+    report_path = out_dir / f"{output_prefix}report_{ts_file}_run{run_index}.md"
     with open(report_path, "w") as f:
         f.write(report)
-    with open(out_dir / "report.md", "w") as f:
+    with open(out_dir / f"{output_prefix}report.md", "w") as f:
         f.write(report)
 
     print(f"\n  Run {run_index} results: {json_path}")
@@ -807,7 +807,7 @@ def classify_stability(scores: list[int], max_score: int = 2) -> str:
         return "Volatile-Fail"
 
 
-def generate_variance_report(all_runs: list[dict], out_dir: Path) -> None:
+def generate_variance_report(all_runs: list[dict], out_dir: Path, output_prefix: str = "") -> None:
     """Generate variance_report.md from multiple run results."""
     import statistics
 
@@ -929,13 +929,13 @@ def generate_variance_report(all_runs: list[dict], out_dir: Path) -> None:
     lines.append("")
 
     # Write
-    report_path = out_dir / "variance_report.md"
+    report_path = out_dir / f"{output_prefix}variance_report.md"
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
     print(f"\nVariance report written to {report_path}")
 
 
-def run_single_suite(cases: list[dict], run_index: int, out_dir: Path) -> dict:
+def run_single_suite(cases: list[dict], run_index: int, out_dir: Path, output_prefix: str = "") -> dict:
     """Execute one full pass of the test suite."""
     run_ts = datetime.now(timezone.utc).isoformat()
     all_results: list[dict] = []
@@ -947,7 +947,7 @@ def run_single_suite(cases: list[dict], run_index: int, out_dir: Path) -> dict:
         result = run_test_case(tc)
         all_results.append(result)
 
-    return _write_single_run(all_results, run_ts, run_index, out_dir)
+    return _write_single_run(all_results, run_ts, run_index, out_dir, output_prefix)
 
 
 def main() -> None:
@@ -959,6 +959,12 @@ def main() -> None:
     for i, arg in enumerate(sys.argv):
         if arg == "--runs" and i + 1 < len(sys.argv):
             n_runs = int(sys.argv[i + 1])
+
+    # Parse --output-prefix PREFIX
+    output_prefix = ""
+    for i, arg in enumerate(sys.argv):
+        if arg == "--output-prefix" and i + 1 < len(sys.argv):
+            output_prefix = sys.argv[i + 1] + "_"
 
     cases = TEST_CASES
     if dry_run:
@@ -975,7 +981,7 @@ def main() -> None:
         print(f"RUN {run_idx}/{n_runs}")
         print("=" * 60)
 
-        run_output = run_single_suite(cases, run_idx, out_dir)
+        run_output = run_single_suite(cases, run_idx, out_dir, output_prefix)
         all_run_outputs.append(run_output)
 
         if run_idx < n_runs:
@@ -987,7 +993,7 @@ def main() -> None:
         print(f"\n{'=' * 60}")
         print(f"VARIANCE ANALYSIS ({n_runs} runs)")
         print("=" * 60)
-        generate_variance_report(all_run_outputs, out_dir)
+        generate_variance_report(all_run_outputs, out_dir, output_prefix)
 
         # Print aggregate
         dims = ["ME", "CDA", "ATC", "BVC", "CGP", "DC"]
