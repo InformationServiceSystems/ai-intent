@@ -11,6 +11,17 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 
+class _SafeEncoder(json.JSONEncoder):
+    """JSON encoder that converts sets to lists and handles other non-serializable types."""
+
+    def default(self, obj):
+        if isinstance(obj, set):
+            return sorted(obj)
+        if isinstance(obj, frozenset):
+            return sorted(obj)
+        return super().default(obj)
+
+
 class MCPMessage(BaseModel):
     """A single inter-agent message in the MCP log."""
 
@@ -66,7 +77,7 @@ class MCPLogger:
                     message.from_agent,
                     message.to_agent,
                     message.method,
-                    json.dumps(message.payload),
+                    json.dumps(message.payload, cls=_SafeEncoder, default=str),
                     message.response_status,
                     json.dumps(message.constraint_flags),
                 ),
