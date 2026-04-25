@@ -10,7 +10,13 @@ from agents.compliance import (
     ComplianceVerdict,
     get_compliance_agent,
 )
-from agents.manifests import DispositionProfile, CENTRAL_MANIFEST, manifest_to_system_prompt
+from agents.manifests import (
+    CENTRAL_MANIFEST,
+    DispositionProfile,
+    confidence_at_or_below,
+    get_manifest,
+    manifest_to_system_prompt,
+)
 from agents.stocks import analyze as stocks_analyze
 from agents.bonds import analyze as bonds_analyze
 from agents.materials import analyze as materials_analyze
@@ -55,6 +61,7 @@ class OrchestrationResult(BaseModel):
     """Return type for a full orchestration run."""
 
     session_id: str
+    principal_id: str
     query: str
     agents_consulted: list[str]
     agents_blocked: list[str]          # agents whose results were dropped by compliance
@@ -67,6 +74,7 @@ class OrchestrationResult(BaseModel):
     total_revisions: int
     forced_blocks: list[str]           # replaces forced_passes
     dispositions_used: dict[str, dict[str, float]]
+    escalations: list[dict[str, Any]] = []   # uncertainty-policy escalations (populated in #2)
 
 
 async def run(
@@ -76,6 +84,7 @@ async def run(
     preset_name: str = "neutral",
     system_prompt_modifier: str = "",
     compliance_multiplier: float = 1.0,
+    principal_id: str = "anonymous",
 ) -> OrchestrationResult:
     """Execute the full orchestration pipeline for a user query."""
     query_clean = (query or "").strip()
@@ -85,6 +94,9 @@ async def run(
     dispositions = dispositions or {}
     logger = get_logger()
     compliance = get_compliance_agent()
+
+    # Bind principal to session so every log entry can be stamped
+    logger.register_principal(session_id, principal_id)
 
     # Apply compliance multiplier from disposition preset
     base_max_revisions = compliance._max_revisions
@@ -100,6 +112,7 @@ async def run(
     all_verdicts: list[ComplianceVerdict] = []
     total_revisions = 0
     forced_blocks: list[str] = []
+    escalations: list[dict[str, Any]] = []
 
     # Log dispositions with preset name
     active_disps = {k: v.model_dump() for k, v in dispositions.items() if any(val > 0 for val in v.model_dump().values())}
@@ -178,6 +191,53 @@ async def run(
                 if result.get("out_of_scope"):
                     all_violations.append(f"{agent_id}: {result.get('analysis', 'out of scope')}")
 
+    # Apply each agent's uncertainty policy to its result
+    for agent_id, result in sub_agent_results.items():
+        if not isinstance(result, dict) or result.get("blocked") or result.get("error"):
+            continue
+        try:
+            manifest = get_manifest(agent_id)
+        except KeyError:
+            continue
+        policy = manifest.uncertainty_policy
+        observed = result.get("confidence")
+        block_triggered = (
+            policy.block_below is not None
+            and confidence_at_or_below(observed, policy.block_below)
+        )
+        escalate_triggered = confidence_at_or_below(observed, policy.escalate_below)
+        if not (escalate_triggered or block_triggered):
+            continue
+        action = "blocked" if block_triggered else "escalated"
+        escalation = {
+            "agent": agent_id,
+            "observed_confidence": observed or "unknown",
+            "escalate_below": policy.escalate_below,
+            "block_below": policy.block_below,
+            "action": action,
+            "recommendation": result.get("recommendation"),
+        }
+        escalations.append(escalation)
+        logger.log(build_message(
+            session_id, "internal", agent_id, "user",
+            f"uncertainty.escalate.{agent_id}",
+            escalation,
+            status="escalated" if action == "escalated" else "blocked",
+        ))
+        if block_triggered:
+            agents_blocked.append(agent_id)
+            sub_agent_results[agent_id] = {
+                "analysis": (
+                    f"Dropped by uncertainty policy: confidence={observed} <= block_below={policy.block_below}. "
+                    f"Original recommendation withheld for principal review."
+                ),
+                "blocked": True,
+                "out_of_scope": False,
+                "recommendation": "not_applicable",
+                "confidence": observed or "low",
+            }
+            all_violations.append(f"{agent_id}: BLOCKED — uncertainty policy (confidence={observed})")
+
     # Build compliance history for the accountability note
     # Include EVERY consulted agent, not just those with verdicts
     compliance_history = []
@@ -228,6 +288,7 @@ async def run(
 
     orch_result = OrchestrationResult(
         session_id=session_id,
+        principal_id=principal_id,
         query=query_clean,
         agents_consulted=agent_ids,
         agents_blocked=agents_blocked,
@@ -240,6 +301,7 @@ async def run(
         total_revisions=total_revisions,
         forced_blocks=forced_blocks,
         dispositions_used=active_disps,
+        escalations=escalations,
     )
 
     # Restore compliance max_revisions to base value

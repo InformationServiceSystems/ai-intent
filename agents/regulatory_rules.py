@@ -53,6 +53,20 @@ MIFID2_RULES: list[RegulatoryRule] = [
         severity="block",
         regulatory_basis="MiFID II Art. 24 — Information to Clients",
     ),
+    RegulatoryRule(
+        rule_id="MANIFEST_DECISION_RIGHT_RESPECTED",
+        description=(
+            "An agent must not emit content that exceeds its decision_right. "
+            "advise: may opine but not propose unilateral imperative actions. "
+            "recommend: may propose actions but not claim to have executed them. "
+            "enforce: gates other agents and does not produce its own recommendations. "
+            "execute: not used in this prototype."
+        ),
+        applies_to=["central", "stocks", "bonds", "materials", "compliance"],
+        check_type="deterministic",
+        severity="block",
+        regulatory_basis="AgentManifest.decision_right",
+    ),
 ]
 
 
