@@ -477,8 +477,8 @@ evaluated at runtime against stochastically generated outputs.
 
 Formally, a manifest $M$ is:
 \begin{equation}
-M = \langle \mathit{id}, \mathit{name}, \mathit{role},
-    \mathit{scope}, C, R, \mathit{summary} \rangle
+M = \langle \mathit{id}, \mathit{name}, \mathit{role}, \mathit{dr},
+    \mathit{scope}, C, K, R, U, \mathit{summary} \rangle
 \end{equation}
 
 \noindent where $\mathit{scope} \in \mathcal{L}$ is a natural-language
@@ -487,7 +487,40 @@ $C = \{c_1, \ldots, c_n\}$ is a finite set of \emph{constraints}, each
 a pair $c_i = \langle \mathit{text}_i, \phi_i \rangle$ with natural-language
 statement $\mathit{text}_i$ and machine-evaluable predicate $\phi_i$, and
 $R: \mathit{Name} \rightarrow \mathit{Value}$ maps risk parameter names
-to their bounds.
+to their bounds. The remaining three fields capture authority,
+capability, and uncertainty handling:
+
+\begin{itemize}
+    \item $\mathit{dr} \in \{\mathit{execute}, \mathit{recommend},
+    \mathit{advise}, \mathit{enforce}\}$ is the agent's
+    \textbf{decision right} --- the level of authority the principal
+    has delegated. An $\mathit{execute}$ agent may take actions with
+    side effects; a $\mathit{recommend}$ agent may propose actions
+    but not execute them; an $\mathit{advise}$ agent may synthesize
+    and opine but must not propose unilateral actions; an
+    $\mathit{enforce}$ agent gates other agents' proposed actions.
+    \item $K$ is the agent's \textbf{capability set} --- the
+    authorized tools, data sources, and (for $\mathit{execute}$
+    agents) actuators it may use. The shape of $K$ depends on
+    $\mathit{dr}$: for $\mathit{recommend}$ and $\mathit{advise}$
+    agents, $K$ is the \emph{opinable surface} (asset universe,
+    permitted value ranges, data sources); for $\mathit{execute}$
+    agents, $K$ additionally includes actuator grants (write access
+    to external APIs, order routing); for $\mathit{enforce}$ agents,
+    $K$ is the read-only access required to evaluate proposed
+    actions.
+    \item $U = \langle \mathit{escalate\_below},
+    \mathit{block\_below} \rangle$ is the agent's
+    \textbf{uncertainty policy}: confidence at or below
+    $\mathit{escalate\_below}$ produces an escalation event in the
+    accountability trace; confidence at or below the optional
+    $\mathit{block\_below}$ threshold causes the result to be
+    dropped from synthesis.
+\end{itemize}
+
+The reference implementation contains no $\mathit{execute}$-tier
+agents, so $K$ is exercised exclusively as recommendation surface;
+this is a property of the prototype, not of the framework.
 
 The distinction between $\mathit{scope}$ and $C$ corresponds to the
 deontic distinction between \emph{competence} and \emph{prohibition}:
@@ -496,6 +529,13 @@ $C$ defines what the agent is forbidden from producing, independent
 of whether the request is in-scope. A materials agent is competent to
 advise on gold (in-scope) but forbidden from recommending more than 15\%
 allocation (boundary constraint). Both must be represented and enforced.
+The decision right $\mathit{dr}$ adds a third deontic axis ---
+\emph{authority} --- distinct from both competence and prohibition: an
+agent may be competent and unconstrained yet still lack the authority
+to act unilaterally. The compliance agent enforces all three axes
+(rule \texttt{MANIFEST\_DECISION\_RIGHT\_RESPECTED} blocks an
+$\mathit{advise}$-tier agent from emitting imperative trade
+instructions, even if the underlying advice is otherwise compliant).
 
 \subsubsection{Manifest Operativity.}
 
@@ -653,6 +693,24 @@ in the session may be sent from the blocked agent to any agent on the
 same topic. This is enforced by the orchestrator: blocked agents are
 excluded from synthesis.
 
+\subsubsection{Override Mechanisms.}
+
+AI-Intent's override policy is delivered at two layers. The
+framework provides \emph{automated} override: compliance verdicts
+can reject a proposed action, request a revision, or --- after a
+configurable revision budget --- drop it as $\mathit{forced\_block}$.
+\emph{Human} override (mid-flight cancellation, manual revert,
+principal-initiated revocation) is a deployment-time property,
+achievable by exposing the principal-stamped session log as a
+control surface. The conceptual model treats these as one capability
+with two delivery modes; the prototype implements only the automated
+layer. This separation matters because regulator-grade deployments
+typically require both: the framework's automated layer guarantees
+that no out-of-policy action is delivered \emph{without human
+attention}, while the deployment layer determines what that
+attention looks like (a queue of held messages, a paging system, a
+manual approval UI).
+
 \subsection{Orchestration Protocol}
 \label{sec:orchestration}
 
@@ -713,6 +771,25 @@ accountability trace from an audit log. An audit log records what
 happened. An accountability trace records what happened and
 \emph{what was prevented}, providing regulators with evidence of
 both compliance and enforcement.
+
+\subsubsection{Append-only persistence and tamper-evidence.}
+
+The trace is structurally append-only: the orchestrator never
+rewrites or deletes prior messages, and every entry carries the
+$\mathit{principal\_id}$ of the session owner so that attribution
+survives session boundaries. Cryptographic tamper-evidence (hash
+chains, signed entries, external attestation) is a deployment
+hardening, not a framework-level guarantee. The reference
+implementation persists messages to SQLite, which is append-only by
+convention only --- adequate for the prototype's audit demonstration
+but insufficient for regulator-grade evidence. Productionising the
+trace for adversarial review is a deployment concern (e.g.\ writing
+to a WORM store, signing each entry with a session key, or chaining
+record hashes), not a framework defect. The model therefore
+specifies the trace as \emph{append-only with deployment-time
+tamper-evidence}, distinguishing the structural guarantee the
+framework provides from the cryptographic guarantee the deployment
+must provide.
 
 %=====================================================================
 \section{Comparative Analysis}

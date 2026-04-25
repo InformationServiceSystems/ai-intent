@@ -580,6 +580,84 @@ def _check_disposition_integrity(
 
 
 # ---------------------------------------------------------------------------
+# Deterministic check — decision_right (applies to all agents)
+# ---------------------------------------------------------------------------
+
+# Imperative trade verbs: an advise-tier agent must not direct the principal
+# to act unilaterally. Quantified guidance ("Allocate 10% to gold") is not a
+# trigger — only standalone imperatives are.
+_ADVISE_OVERSTEP_PATTERNS = [
+    re.compile(r"\bbuy\s+(it|this|now|immediately)\b", re.IGNORECASE),
+    re.compile(r"\bsell\s+(it|this|now|immediately)\b", re.IGNORECASE),
+    re.compile(r"\bexecute\s+(the\s+|this\s+)?trade\b", re.IGNORECASE),
+    re.compile(r"\bplace\s+(this\s+|the\s+)?order\b", re.IGNORECASE),
+    re.compile(r"\bsubmit\s+(this\s+|the\s+)?order\b", re.IGNORECASE),
+    re.compile(r"\binitiate\s+(the\s+|this\s+)?(trade|transaction)\b", re.IGNORECASE),
+]
+
+# First-person execution claims: a recommend-tier agent must not assert that
+# it itself has placed or will place a trade. It may propose actions only.
+_RECOMMEND_OVERSTEP_PATTERNS = [
+    re.compile(r"\bI\s+am\s+(buying|selling|executing|placing)\b", re.IGNORECASE),
+    re.compile(r"\bI[' ]?m\s+(buying|selling|executing|placing)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+will\s+(buy|sell|execute|place|submit)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+have\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
+    re.compile(r"\bI[' ]?ve\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
+    re.compile(r"\border\s+(submitted|placed|executed)\b", re.IGNORECASE),
+]
+
+
+def _check_decision_right(
+    payload: dict[str, Any],
+    manifest: AgentManifest,
+) -> list[RuleResult]:
+    """Verify that an agent's emitted content respects its decision_right."""
+    dr = manifest.decision_right
+    text_fields = [
+        str(payload.get("final_recommendation", "")),
+        str(payload.get("analysis", "")),
+        str(payload.get("recommendation", "")) if isinstance(payload.get("recommendation"), str) else "",
+    ]
+    text = "\n".join(t for t in text_fields if t)
+
+    if dr == "advise":
+        matches = [p.pattern for p in _ADVISE_OVERSTEP_PATTERNS if p.search(text)]
+        passed = len(matches) == 0
+        detail = (
+            f"advise-tier agent emitted unilateral imperatives: {matches[:3]}"
+            if matches else "No unilateral imperative actions detected"
+        )
+    elif dr == "recommend":
+        matches = [p.pattern for p in _RECOMMEND_OVERSTEP_PATTERNS if p.search(text)]
+        passed = len(matches) == 0
+        detail = (
+            f"recommend-tier agent claimed execution: {matches[:3]}"
+            if matches else "No first-person execution claims detected"
+        )
+    elif dr == "enforce":
+        rec_field = payload.get("recommendation")
+        passed = not (isinstance(rec_field, str) and rec_field.strip() and rec_field != "not_applicable")
+        detail = (
+            f"enforce-tier agent emitted recommendation field: {rec_field!r}"
+            if not passed else "No recommendation field emitted"
+        )
+    else:
+        # 'execute' tier is not present in this prototype; nothing to check.
+        passed = True
+        detail = f"decision_right={dr} — no overstep check applicable"
+
+    return [RuleResult(
+        rule="Agent must not exceed its decision_right",
+        rule_id="MANIFEST_DECISION_RIGHT_RESPECTED",
+        source="deterministic",
+        passed=passed,
+        detail=detail,
+        regulatory_basis="AgentManifest.decision_right",
+    )]
+
+
+# ---------------------------------------------------------------------------
 # Deterministic checks — synthesis
 # ---------------------------------------------------------------------------
 
@@ -832,6 +910,9 @@ class ComplianceAgent:
         checker = _ANALYSIS_CHECKERS.get(agent_id)
         det_results = checker(analysis_payload) if checker else []
 
+        # Decision-right enforcement — applies to every agent regardless of role
+        det_results.extend(_check_decision_right(analysis_payload, manifest))
+
         # Disposition integrity checks — detect agents gaming self-reporting
         if disposition is not None:
             integrity_results = _check_disposition_integrity(agent_id, analysis_payload, disposition)
@@ -859,6 +940,8 @@ class ComplianceAgent:
         """Evaluate the orchestrator's synthesis output (CP3)."""
         logger = get_logger()
         det_results = _check_synthesis(synthesis_payload, sub_agent_results)
+        # Decision-right enforcement on the central (advise-tier) output
+        det_results.extend(_check_decision_right(synthesis_payload, CENTRAL_MANIFEST))
         return self._build_verdict(
             det_results, [], "synthesis", "central", session_id, logger,
         )
@@ -1019,10 +1102,13 @@ class ComplianceAgent:
             )
 
             # Log: compliance reports to orchestrator
+            policy_id = get_manifest(agent_id).override_policy.policy_id
+            revision_payload = revision.model_dump()
+            revision_payload["policy_id"] = policy_id
             logger.log(build_message(
                 session_id, "outbound", "compliance", "central",
                 f"compliance.revision.{agent_id}",
-                revision.model_dump(), "constraint_violation",
+                revision_payload, "constraint_violation",
             ))
 
             # Re-run agent WITHOUT disposition
@@ -1067,6 +1153,7 @@ class ComplianceAgent:
                     "revision_count": revision_count,
                     "violated_rules": verdict.violated_rules,
                     "regulatory_basis": verdict.regulatory_basis,
+                    "policy_id": get_manifest(agent_id).override_policy.policy_id,
                 },
                 "forced_block",
             ))

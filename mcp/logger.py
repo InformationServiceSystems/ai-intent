@@ -27,13 +27,14 @@ class MCPMessage(BaseModel):
 
     id: str
     session_id: str
+    principal_id: str | None = None
     timestamp: datetime
     direction: Literal["outbound", "inbound", "internal"]
     from_agent: str
     to_agent: str
     method: str
     payload: dict[str, Any]
-    response_status: Literal["pending", "ok", "error", "constraint_violation", "forced_pass", "forced_block", "approved", "blocked"]
+    response_status: Literal["pending", "ok", "error", "constraint_violation", "forced_pass", "forced_block", "approved", "blocked", "escalated"]
     constraint_flags: list[str]
 
 
@@ -62,13 +63,41 @@ class MCPLogger:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_session ON mcp_messages(session_id)"
         )
+        # Migration: add principal_id column if it does not already exist
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(mcp_messages)").fetchall()}
+        if "principal_id" not in cols:
+            self._conn.execute("ALTER TABLE mcp_messages ADD COLUMN principal_id TEXT")
         self._conn.commit()
+        # In-memory registry mapping session_id -> principal_id
+        self._session_principals: dict[str, str] = {}
+
+    def register_principal(self, session_id: str, principal_id: str) -> None:
+        """Bind a principal to a session so subsequent log() calls can stamp it."""
+        with self._lock:
+            self._session_principals[session_id] = principal_id
+
+    def get_principal(self, session_id: str) -> str | None:
+        """Return the principal bound to a session, if any."""
+        with self._lock:
+            principal = self._session_principals.get(session_id)
+        if principal is not None:
+            return principal
+        # Fall back to the database — useful when reloading an old session
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT principal_id FROM mcp_messages WHERE session_id = ? AND principal_id IS NOT NULL LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return row[0] if row else None
 
     def log(self, message: MCPMessage) -> None:
         """Persist a single MCPMessage to the database."""
+        principal_id = message.principal_id or self._session_principals.get(message.session_id)
         with self._lock:
             self._conn.execute(
-                "INSERT INTO mcp_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO mcp_messages "
+                "(id, session_id, timestamp, direction, from_agent, to_agent, method, payload, response_status, constraint_flags, principal_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.session_id,
@@ -80,6 +109,7 @@ class MCPLogger:
                     json.dumps(message.payload, cls=_SafeEncoder, default=str),
                     message.response_status,
                     json.dumps(message.constraint_flags),
+                    principal_id,
                 ),
             )
             self._conn.commit()
@@ -88,7 +118,9 @@ class MCPLogger:
         """Return all messages for a session, ordered by timestamp ascending."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM mcp_messages WHERE session_id = ? ORDER BY timestamp ASC",
+                "SELECT id, session_id, timestamp, direction, from_agent, to_agent, "
+                "method, payload, response_status, constraint_flags, principal_id "
+                "FROM mcp_messages WHERE session_id = ? ORDER BY timestamp ASC",
                 (session_id,),
             ).fetchall()
         return [
@@ -103,6 +135,7 @@ class MCPLogger:
                 payload=json.loads(r[7]),
                 response_status=r[8],
                 constraint_flags=json.loads(r[9]),
+                principal_id=r[10],
             )
             for r in rows
         ]
@@ -147,11 +180,13 @@ def build_message(
     payload: dict,
     status: str = "ok",
     constraint_flags: list[str] | None = None,
+    principal_id: str | None = None,
 ) -> MCPMessage:
     """Construct an MCPMessage with auto-generated id and current timestamp."""
     return MCPMessage(
         id=str(uuid4()),
         session_id=session_id,
+        principal_id=principal_id,
         timestamp=datetime.now(timezone.utc),
         direction=direction,
         from_agent=from_agent,

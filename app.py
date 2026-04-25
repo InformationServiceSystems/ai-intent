@@ -27,6 +27,7 @@ st.set_page_config(
 
 def _generate_trace(result) -> dict:
     """Build the accountability trace dict from an OrchestrationResult."""
+    from agents.manifests import _MANIFEST_REGISTRY, get_manifest
     logger = get_logger()
     messages = logger.get_session(result.session_id)
 
@@ -40,8 +41,43 @@ def _generate_trace(result) -> dict:
         constraint_checks.append({"agent": agent_id, "constraints_applied": flags, "violations": violations})
         all_constraints.extend(flags)
 
+    # Cross-reference all entities the trace touches by identifier
+    consulted_manifests = [get_manifest(a) for a in result.agents_consulted if a in _MANIFEST_REGISTRY]
+    referenced_capabilities: list[str] = []
+    referenced_decision_rights: dict[str, str] = {}
+    referenced_uncertainty_policies: list[str] = []
+    referenced_override_policies: set[str] = set()
+    referenced_boundary_rules: set[str] = set()
+
+    for m in consulted_manifests:
+        referenced_decision_rights[m.agent_id] = m.decision_right
+        referenced_capabilities.extend(c.capability_id for c in m.capabilities)
+        referenced_uncertainty_policies.append(
+            f"{m.agent_id}:escalate_below={m.uncertainty_policy.escalate_below}"
+        )
+        referenced_override_policies.add(m.override_policy.policy_id)
+
+    for v in result.compliance_verdicts:
+        for rule_id in v.get("violated_rules") or []:
+            referenced_boundary_rules.add(rule_id)
+
+    # Detect post-hoc principal revocation (a principal.revoke message in the log)
+    revocation = None
+    for m in messages:
+        if m.method == "principal.revoke":
+            revocation = {
+                "revoked": True,
+                "at": m.payload.get("revoked_at"),
+                "by": m.payload.get("principal_id"),
+                "policy_id": m.payload.get("policy_id"),
+                "reason": m.payload.get("reason", ""),
+            }
+            referenced_override_policies.add(m.payload.get("policy_id", ""))
+            break
+
     return {
         "session_id": result.session_id,
+        "principal_id": result.principal_id,
         "generated_at": messages[-1].timestamp.isoformat() if messages else "",
         "framework": "AI-Intent v1.0",
         "query": result.query,
@@ -51,6 +87,16 @@ def _generate_trace(result) -> dict:
         "compliance_verdicts": result.compliance_verdicts,
         "total_revisions": result.total_revisions,
         "forced_blocks": result.forced_blocks,
+        "escalations": result.escalations,
+        "revocation": revocation,
+        "referenced_entities": {
+            "mandates": [m.agent_id for m in consulted_manifests],
+            "decision_rights": referenced_decision_rights,
+            "capabilities": sorted(set(referenced_capabilities)),
+            "uncertainty_policies": referenced_uncertainty_policies,
+            "override_policies": sorted(p for p in referenced_override_policies if p),
+            "boundary_rules": sorted(referenced_boundary_rules),
+        },
         "mcp_message_count": len(messages),
         "final_recommendation_summary": result.final_recommendation,
         "full_mcp_log": [m.model_dump(mode="json") for m in messages],
@@ -64,6 +110,7 @@ def _format_trace_text(trace: dict) -> str:
         "AI-INTENT ACCOUNTABILITY TRACE",
         "=" * 60,
         f"Framework: {trace['framework']}",
+        f"Principal: {trace.get('principal_id', 'anonymous')}",
         f"Session:   {trace['session_id']}",
         f"Generated: {trace['generated_at']}",
         "",
@@ -88,6 +135,40 @@ def _format_trace_text(trace: dict) -> str:
     lines.append(f"  Total revisions: {trace['total_revisions']}")
     lines.append(f"  Forced blocks: {', '.join(trace['forced_blocks']) or 'none'}")
     lines.append(f"  Checkpoints evaluated: {len(trace['compliance_verdicts'])}")
+    lines.append("")
+    escalations = trace.get("escalations") or []
+    lines.append("UNCERTAINTY ESCALATIONS:")
+    if escalations:
+        for esc in escalations:
+            lines.append(
+                f"  - {esc['agent']}: confidence={esc['observed_confidence']}, "
+                f"action={esc['action']} (threshold escalate_below={esc['escalate_below']})"
+            )
+    else:
+        lines.append("  none")
+    lines.append("")
+    revocation = trace.get("revocation")
+    lines.append("PRINCIPAL REVOCATION:")
+    if revocation:
+        lines.append(f"  Revoked at: {revocation['at']}")
+        lines.append(f"  By:         {revocation['by']}")
+        lines.append(f"  Policy:     {revocation['policy_id']}")
+        if revocation.get("reason"):
+            lines.append(f"  Reason:     {revocation['reason']}")
+    else:
+        lines.append("  not revoked")
+    lines.append("")
+    refs = trace.get("referenced_entities") or {}
+    lines.append("REFERENCED ENTITIES (for provenance reconstruction):")
+    lines.append(f"  Mandates:             {', '.join(refs.get('mandates', [])) or 'none'}")
+    dr = refs.get("decision_rights") or {}
+    lines.append(f"  Decision rights:      {', '.join(f'{k}={v}' for k, v in dr.items()) or 'none'}")
+    caps = refs.get("capabilities") or []
+    lines.append(f"  Capabilities:         {', '.join(caps) or 'none'}")
+    lines.append(f"  Uncertainty policies: {', '.join(refs.get('uncertainty_policies', [])) or 'none'}")
+    lines.append(f"  Override policies:    {', '.join(refs.get('override_policies', [])) or 'none'}")
+    rules = refs.get("boundary_rules") or []
+    lines.append(f"  Boundary rules fired: {', '.join(rules) or 'none'}")
     lines.append("")
     lines.append(f"MCP MESSAGES: {trace['mcp_message_count']}")
     lines.append("")
@@ -211,6 +292,19 @@ with st.sidebar:
         "A **Compliance Gate Agent** intercepts all inter-agent messages, "
         "evaluating them against manifest constraints before forwarding."
     )
+
+    st.divider()
+
+    # Principal identity — who owns the objective and audits the trace
+    st.subheader("Principal")
+    principal_id = st.text_input(
+        "Principal ID",
+        value=st.session_state.get("principal_id", "demo_user@local"),
+        help="The human user, organization, or root authority that owns this session. "
+             "Stamped on every MCP log entry for audit attribution.",
+        key="principal_id_input",
+    )
+    st.session_state["principal_id"] = principal_id.strip() or "anonymous"
 
     st.divider()
 
@@ -367,6 +461,7 @@ with col2:
                     preset_name=preset_name,
                     system_prompt_modifier=active_preset.get("system_prompt_modifier", ""),
                     compliance_multiplier=active_preset.get("compliance_multiplier", 1.0),
+                    principal_id=st.session_state.get("principal_id", "anonymous"),
                 ))
                 st.write(f"Phase 3: Delegated to: {', '.join(result.agents_consulted)} (with CP2 compliance)")
                 st.write("Phase 4: Synthesizing with compliance check (CP3)...")
@@ -412,11 +507,67 @@ with col2:
                     with rc2:
                         st.metric("Forced Blocks", len(result.forced_blocks))
 
+            # Uncertainty escalations — flagged for principal review
+            if result.escalations:
+                with st.container(border=True):
+                    st.markdown("**Uncertainty escalations** (flagged for principal review)")
+                    for esc in result.escalations:
+                        action_label = "BLOCKED" if esc["action"] == "blocked" else "escalated"
+                        st.markdown(
+                            f"- `{esc['agent']}` — confidence=`{esc['observed_confidence']}` "
+                            f"(threshold ≤ `{esc['escalate_below']}`) → **{action_label}**"
+                        )
+
             with st.expander("Accountability Note"):
                 st.text(result.accountability_note)
 
             with st.expander("Routing Rationale"):
                 st.text(result.routing_rationale)
+
+            # Principal revocation — post-hoc override
+            from agents.manifests import DEFAULT_OVERRIDE_POLICY
+            from datetime import datetime, timezone
+            from mcp.logger import build_message as _build_message
+            revoke_key = f"revoked_{result.session_id}"
+            already_revoked = st.session_state.get(revoke_key, False)
+            with st.container(border=True):
+                rcol1, rcol2 = st.columns([0.6, 0.4])
+                with rcol1:
+                    st.markdown(
+                        "**Principal override.** This session is complete; you can revoke "
+                        "this recommendation post-hoc. The revocation is stamped into the "
+                        "accountability trace by `policy_id`."
+                    )
+                with rcol2:
+                    if already_revoked:
+                        st.error("Session revoked")
+                    else:
+                        revoke_reason = st.text_input(
+                            "Reason (optional)", key=f"revoke_reason_{result.session_id}",
+                            placeholder="e.g. policy review, audit hold",
+                        )
+                        if st.button(
+                            "⚠ Revoke this session",
+                            key=f"revoke_btn_{result.session_id}",
+                            type="secondary",
+                            disabled=not DEFAULT_OVERRIDE_POLICY.principal_revoke_enabled,
+                        ):
+                            logger = get_logger()
+                            logger.log(_build_message(
+                                result.session_id, "internal",
+                                "user", "central",
+                                "principal.revoke",
+                                {
+                                    "policy_id": DEFAULT_OVERRIDE_POLICY.policy_id,
+                                    "principal_id": result.principal_id,
+                                    "revoked_at": datetime.now(timezone.utc).isoformat(),
+                                    "reason": revoke_reason or "",
+                                },
+                                "approved",
+                                principal_id=result.principal_id,
+                            ))
+                            st.session_state[revoke_key] = True
+                            st.rerun()
 
             # Download buttons
             trace = _generate_trace(result)
