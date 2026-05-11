@@ -2,8 +2,6 @@
 
 A Streamlit application demonstrating the **AI-Intent framework** for agentic AI systems. A central LLM orchestrator delegates to specialist sub-agents (equities, bonds, commodities) via a simulated MCP (Model Context Protocol) message bus, with a **Compliance Agent** acting as an inline regulatory gatekeeper that intercepts every inter-agent message before delivery.
 
-> **Paper:** W. Maass, "AI-Intent: Explicit, Bounded, and Auditable Delegation in Agentic AI Systems" — ER 2026 submission.
-
 ---
 
 ## Architecture
