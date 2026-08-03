@@ -91,7 +91,6 @@ LLM_MODEL=llama3.1:70b streamlit run app.py
 ai-intent/
 ├── app.py                      # Streamlit entry point + dashboard layout
 ├── requirements.txt
-├── the internal project spec                   # Full project specification + amendments
 │
 ├── agents/
 │   ├── manifests.py            # AgentManifest + DispositionProfile definitions
