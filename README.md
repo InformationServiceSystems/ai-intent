@@ -33,9 +33,13 @@ Every arrow passes through the Compliance Agent. No message is delivered without
 
 ## Key Concepts
 
-**AgentManifest** — Each agent has a machine-readable manifest defining its intent scope, boundary constraints, and risk parameters. Manifests are immutable at runtime.
+**Principal** — The owner of the governance structure: holds the portfolio objectives, authors and owns the agent Mandates, and is recorded in every accountability trace for provenance.
 
-**Regulatory Rule Registry** — 24 structured rules covering MiFID II suitability requirements and per-agent manifest constraints. Every compliance rejection references specific `rule_id`s and `regulatory_basis` entries.
+**AgentManifest (Mandate)** — Each agent has a machine-readable manifest defining its intent scope, decision right, boundary constraints, capabilities, and risk parameters, plus uncertainty and override policies. Manifests are immutable at runtime.
+
+**Boundary constraints — ⟨text, φ, τ⟩** — Each boundary constraint is a triple of a natural-language statement, a machine-evaluable predicate `φ`, and a deontic type `τ ∈ {F, O}` (prohibition / obligation). A prohibition fails iff the output satisfies `φ`; risk parameters bind the numeric threshold in `φ`. Percentage caps read a structured `proposed_allocation` field from agent output, falling back to text extraction when it is absent.
+
+**Regulatory Rule Registry** — 25 structured rules covering MiFID II suitability requirements and per-agent manifest constraints. Every compliance rejection references specific `rule_id`s and `regulatory_basis` entries.
 
 **ComplianceVerdict** — The output of every compliance evaluation. Contains `approved/rejected/forced_block` status, violated rule IDs, regulatory basis, and revision instructions.
 
@@ -56,7 +60,7 @@ Every arrow passes through the Compliance Agent. No message is delivered without
 
 ```bash
 # Clone
-git clone https://github.com/wmaass/ai-intent.git
+git clone https://github.com/InformationServiceSystems/ai-intent.git
 cd ai-intent
 
 # Install dependencies
@@ -93,10 +97,11 @@ ai-intent/
 ├── requirements.txt
 │
 ├── agents/
-│   ├── manifests.py            # AgentManifest + DispositionProfile definitions
-│   ├── regulatory_rules.py     # RegulatoryRule registry (MiFID II + manifest rules)
-│   ├── compliance.py           # ComplianceAgent gatekeeper + route() function
+│   ├── manifests.py            # AgentManifest, Principal, DispositionProfile, capabilities/policies
+│   ├── regulatory_rules.py     # RegulatoryRule registry + ⟨text, φ, τ⟩ BoundaryConstraints
+│   ├── compliance.py           # ComplianceAgent gatekeeper + route() + boundary-constraint interpreter
 │   ├── orchestrator.py         # Central orchestrator pipeline
+│   ├── dispositions.py         # Behavioral disposition presets
 │   ├── stocks.py               # Equity analysis sub-agent
 │   ├── bonds.py                # Fixed income sub-agent
 │   └── materials.py            # Commodities sub-agent
@@ -114,13 +119,24 @@ ai-intent/
 │   ├── intent_timeline.py      # 5-phase orchestration timeline
 │   ├── constraint_view.py      # Per-agent constraint audit + revision history
 │   ├── revision_history.py     # Compliance verdict summary
+│   ├── manifest_diff.py        # Manifest / disposition diff view
+│   ├── mcp_stream.py           # Live MCP message log panel
 │   └── routing_panel.py        # Routing decision display
+│
+├── evaluation/
+│   ├── runner.py               # 19-case evaluation suite across 6 dimensions
+│   ├── spot_check.py           # Quick single-case checks
+│   └── paper_analysis.py       # Aggregate analysis for the paper
+│
+├── tests/
+│   ├── test_boundary_equiv.py       # ⟨text, φ, τ⟩ interpreter vs independent oracle
+│   └── test_proposed_allocation.py  # structured proposed_allocation predicate tests
 │
 ├── paper/
 │   ├── ai-intent-er2026.tex    # ER 2026 paper source
-│   ├── evaluation-procedure.md # 15-case test suite with scoring rubrics
-│   ├── PRD-compliance-agent.md # Compliance agent design document
-│   └── PRD-llm-robustness.md  # LLM robustness requirements
+│   ├── ai-intent-er2026-v2.tex # revised paper source
+│   ├── evaluation-procedure.md # test suite with scoring rubrics
+│   └── PRD-*.md, *-alignment.md # design / conceptual-alignment documents
 │
 └── data/
     └── sessions.db             # SQLite database (auto-created)
@@ -130,17 +146,25 @@ ai-intent/
 
 ## Evaluation
 
-The project includes a formal evaluation procedure with 15 test cases across 5 dimensions:
+The project includes a formal evaluation procedure with 19 test cases (15 core + 4 disposition-invariance) across 6 dimensions, run via `python evaluation/runner.py`:
 
 | Dimension | What it measures |
 |-----------|-----------------|
 | Mandate Enforcement (ME) | Agents correctly identify in-scope vs out-of-scope |
-| Constraint Detection Accuracy (CDA) | Compliance gate catches all violations on first evaluation |
+| Constraint Detection Accuracy (CDA) | Compliance gate catches violations on first evaluation |
 | Accountability Trace Completeness (ATC) | Session JSON contains full revision history with rule IDs |
 | Boundary Violation Containment (BVC) | Zero non-compliant messages delivered (zero tolerance) |
 | Compliance Gate Precision (CGP) | Zero false positives from the compliance gate |
+| Disposition Containment (DC) | Mandate limits hold regardless of agent disposition preset |
 
 See [`paper/evaluation-procedure.md`](paper/evaluation-procedure.md) for the full test suite, scoring rubrics, and pass thresholds.
+
+The deterministic unit tests run without a model or network:
+
+```bash
+python tests/test_boundary_equiv.py
+python tests/test_proposed_allocation.py
+```
 
 ### Quick smoke test
 
