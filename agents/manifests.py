@@ -110,6 +110,23 @@ class Capability(BaseModel):
     value: Any            # the bound value
 
 
+class Principal(BaseModel):
+    """The individual or institutional entity that owns the governance structure.
+
+    Per the AI-Intent conceptual model, the Principal holds the system's
+    objectives, delegates tasks to Agents, and authors/owns their Mandates.
+    In this reference implementation the Principal is a configuration entity
+    (there is no human-in-the-loop runtime), but it is modeled explicitly so
+    the objectives->mandate provenance chain is represented in data rather than
+    left implicit.
+    """
+
+    principal_id: str
+    name: str
+    objectives: list[str]
+    owned_mandate_ids: list[str] = []   # agent_ids of the Mandates this Principal authors & owns
+
+
 class AgentManifest(BaseModel):
     """Schema encoding what each agent is and is not allowed to do."""
 
@@ -117,6 +134,11 @@ class AgentManifest(BaseModel):
     name: str
     emoji: str
     role: str
+    # Agent-level attributes (distinct from the Mandate content below).
+    # composite distinguishes orchestrators from specialist sub-agents;
+    # a composite agent invokes the Compliance Agent before delegating.
+    composite: bool = False
+    domain_expertise: str = ""
     decision_right: DecisionRight
     intent_scope: str
     boundary_constraints: list[str]
@@ -126,6 +148,8 @@ class AgentManifest(BaseModel):
     uncertainty_policy: UncertaintyPolicy = UncertaintyPolicy()
     override_policy: OverridePolicy = DEFAULT_OVERRIDE_POLICY
     disposition: DispositionProfile = DispositionProfile()
+    # The Principal that authors & owns this Mandate (Principal -> Mandate, 1..*).
+    principal_id: str | None = None
     # Mandate decomposition: parent / sub-mandate IDs. Compliance is
     # deliberately outside the decomposition tree — it is a gate, not a
     # sub-mandate.
@@ -138,6 +162,9 @@ CENTRAL_MANIFEST = AgentManifest(
     name="Central Investment Orchestrator",
     emoji="\U0001f9e0",
     role="Private Investment Coordinator",
+    composite=True,
+    domain_expertise="Portfolio orchestration and multi-asset synthesis",
+    principal_id="anonymous",
     decision_right="advise",
     intent_scope="Orchestrate private investment decisions by delegating to specialist sub-agents, synthesizing their outputs, and producing auditable recommendations within defined portfolio risk bounds.",
     boundary_constraints=[
@@ -195,6 +222,9 @@ STOCKS_MANIFEST = AgentManifest(
     name="Stock Broker Agent",
     emoji="\U0001f4c8",
     role="Equity Analysis Specialist",
+    composite=False,
+    domain_expertise="Large-cap equity analysis",
+    principal_id="anonymous",
     decision_right="recommend",
     intent_scope="Analyze equity investment opportunities within the approved large-cap universe and provide risk-adjusted return assessments aligned with the portfolio mandate.",
     boundary_constraints=[
@@ -237,6 +267,9 @@ BONDS_MANIFEST = AgentManifest(
     name="Bond Agent",
     emoji="\U0001f3db\ufe0f",
     role="Fixed Income Specialist",
+    composite=False,
+    domain_expertise="Investment-grade fixed income",
+    principal_id="anonymous",
     decision_right="recommend",
     intent_scope="Manage fixed-income allocation to provide portfolio stability, predictable cash flows, and capital preservation within approved credit quality and duration limits.",
     boundary_constraints=[
@@ -286,6 +319,9 @@ MATERIALS_MANIFEST = AgentManifest(
     name="Raw Materials Agent",
     emoji="\u26cf\ufe0f",
     role="Commodities Specialist",
+    composite=False,
+    domain_expertise="Precious-metals commodities (gold, silver)",
+    principal_id="anonymous",
     decision_right="recommend",
     intent_scope="Evaluate commodity positions as an inflation hedge and portfolio diversifier, restricted to approved commodity types and within defined allocation limits.",
     boundary_constraints=[
@@ -335,6 +371,9 @@ COMPLIANCE_MANIFEST = AgentManifest(
     name="Compliance Gate Agent",
     emoji="\U0001f6e1\ufe0f",
     role="Intent Enforcement & Audit Verifier",
+    composite=False,
+    domain_expertise="Regulatory compliance and intent enforcement",
+    principal_id="anonymous",
     decision_right="enforce",
     intent_scope="Verify that all inter-agent messages comply with the sender's and receiver's manifest constraints. Evaluate messages at routing, analysis, and synthesis checkpoints. Return non-compliant messages for revision with specific feedback.",
     boundary_constraints=[
@@ -382,6 +421,64 @@ COMPLIANCE_MANIFEST = AgentManifest(
 _MANIFEST_REGISTRY: dict[str, AgentManifest] = {
     m.agent_id: m for m in [CENTRAL_MANIFEST, STOCKS_MANIFEST, BONDS_MANIFEST, MATERIALS_MANIFEST, COMPLIANCE_MANIFEST]
 }
+
+
+# The default Principal for this reference implementation. It authors and owns
+# every Mandate and holds the portfolio-level objectives from which the
+# Mandates' AuthorizedObjectives derive.
+DEFAULT_PRINCIPAL = Principal(
+    principal_id="anonymous",
+    name="Default Portfolio Owner",
+    objectives=[
+        "Grow the portfolio within a conservative, regulation-compliant risk envelope",
+        "Preserve capital through diversification across equities, fixed income, and commodities",
+        "Ensure every recommendation is auditable and traceable to a stated objective",
+    ],
+    owned_mandate_ids=["central", "stocks", "bonds", "materials", "compliance"],
+)
+
+_PRINCIPAL_REGISTRY: dict[str, Principal] = {DEFAULT_PRINCIPAL.principal_id: DEFAULT_PRINCIPAL}
+
+
+def get_principal(principal_id: str) -> Principal:
+    """Return the Principal for a given id, falling back to the default principal."""
+    return _PRINCIPAL_REGISTRY.get(principal_id, DEFAULT_PRINCIPAL)
+
+
+def register_principal(principal: Principal) -> Principal:
+    """Add or replace a Principal in the registry and return it."""
+    _PRINCIPAL_REGISTRY[principal.principal_id] = principal
+    return principal
+
+
+def ensure_principal(
+    principal_id: str,
+    objectives: list[str] | None = None,
+    name: str | None = None,
+) -> Principal:
+    """Return the registered Principal for an id, creating one if absent.
+
+    A newly created Principal inherits the default owner's objectives and
+    mandate ownership unless overrides are supplied, so a session-supplied
+    principal id resolves to a real Principal whose id matches the session
+    rather than falling back to the anonymous default.
+    """
+    existing = _PRINCIPAL_REGISTRY.get(principal_id)
+    resolved_objectives = objectives if objectives is not None else list(DEFAULT_PRINCIPAL.objectives)
+    if existing is not None:
+        # Refresh objectives/name if the caller supplied new ones.
+        if objectives is not None:
+            existing.objectives = resolved_objectives
+        if name is not None:
+            existing.name = name
+        return existing
+    principal = Principal(
+        principal_id=principal_id,
+        name=name or principal_id,
+        objectives=resolved_objectives,
+        owned_mandate_ids=list(DEFAULT_PRINCIPAL.owned_mandate_ids),
+    )
+    return register_principal(principal)
 
 
 def get_manifest(agent_id: str) -> AgentManifest:

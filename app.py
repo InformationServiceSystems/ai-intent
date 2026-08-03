@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import streamlit as st
 
-from agents.manifests import DispositionProfile
+from agents.manifests import DEFAULT_PRINCIPAL, DispositionProfile, ensure_principal
 from agents.orchestrator import run
 from mcp.logger import get_logger
 from ui.agent_graph import render_agent_graph
@@ -27,9 +27,13 @@ st.set_page_config(
 
 def _generate_trace(result) -> dict:
     """Build the accountability trace dict from an OrchestrationResult."""
-    from agents.manifests import _MANIFEST_REGISTRY, get_manifest
+    from agents.manifests import _MANIFEST_REGISTRY, get_manifest, get_principal
     logger = get_logger()
     messages = logger.get_session(result.session_id)
+
+    # Resolve the Principal that owns the governance structure so the
+    # objectives -> Mandate provenance chain is visible in the audit artifact.
+    principal = get_principal(result.principal_id)
 
     all_constraints = []
     constraint_checks = []
@@ -78,6 +82,12 @@ def _generate_trace(result) -> dict:
     return {
         "session_id": result.session_id,
         "principal_id": result.principal_id,
+        "principal": {
+            "principal_id": principal.principal_id,
+            "name": principal.name,
+            "objectives": principal.objectives,
+            "owns_mandates": principal.owned_mandate_ids,
+        },
         "generated_at": messages[-1].timestamp.isoformat() if messages else "",
         "framework": "AI-Intent v1.0",
         "query": result.query,
@@ -114,6 +124,16 @@ def _format_trace_text(trace: dict) -> str:
         f"Session:   {trace['session_id']}",
         f"Generated: {trace['generated_at']}",
         "",
+    ]
+    principal = trace.get("principal") or {}
+    if principal:
+        lines.append("PRINCIPAL & OBJECTIVES (mandate provenance):")
+        lines.append(f"  Owner: {principal.get('name', '')} ({principal.get('principal_id', '')})")
+        lines.append(f"  Owns mandates: {', '.join(principal.get('owns_mandates', [])) or 'none'}")
+        for obj in principal.get("objectives", []):
+            lines.append(f"    - {obj}")
+        lines.append("")
+    lines += [
         "QUERY:",
         f"  {trace['query']}",
         "",
@@ -304,7 +324,25 @@ with st.sidebar:
              "Stamped on every MCP log entry for audit attribution.",
         key="principal_id_input",
     )
-    st.session_state["principal_id"] = principal_id.strip() or "anonymous"
+    principal_id = principal_id.strip() or "anonymous"
+    st.session_state["principal_id"] = principal_id
+
+    objectives_text = st.text_area(
+        "Principal objectives",
+        value=st.session_state.get(
+            "principal_objectives_text", "\n".join(DEFAULT_PRINCIPAL.objectives)
+        ),
+        help="The portfolio-level objectives this Principal holds. Mandate "
+             "AuthorizedObjectives derive from these, and they are recorded in the "
+             "accountability trace as provenance.",
+        key="principal_objectives_input",
+    )
+    st.session_state["principal_objectives_text"] = objectives_text
+    _objectives = [line.strip() for line in objectives_text.splitlines() if line.strip()]
+
+    # Register the entered id as a real Principal so it resolves to itself
+    # (with its own objectives) rather than falling back to the default owner.
+    ensure_principal(principal_id, objectives=_objectives or None)
 
     st.divider()
 

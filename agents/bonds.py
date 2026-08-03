@@ -18,8 +18,10 @@ Respond ONLY in this JSON format (no other text):
   "constraint_flags": ["list any constraints that were relevant or nearly violated"],
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
+  "proposed_allocation": [0.25, 0.20],
   "out_of_scope": false
 }
+"proposed_allocation" is the list of per-maturity-bucket allocation fractions you are proposing, as decimals (0.25 = 25%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your per-year maturity limit.
 If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
 
 

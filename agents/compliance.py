@@ -19,7 +19,9 @@ from agents.manifests import (
     manifest_to_system_prompt,
 )
 from agents.regulatory_rules import (
+    BoundaryConstraint,
     RegulatoryRule,
+    get_boundary_constraints_for_agent,
     get_rules_for_agent,
     RULE_REGISTRY,
 )
@@ -103,44 +105,16 @@ Respond ONLY in this JSON format (no other text):
 
 
 # ---------------------------------------------------------------------------
-# Keyword helpers (preserved from previous implementation)
+# Keyword helpers
 # ---------------------------------------------------------------------------
+# The forbidden-term patterns and disclosure vocabularies now live with the
+# boundary-constraint definitions in agents/regulatory_rules.py (as data on
+# each Predicate). Only the backward-reference filter, used by the shared
+# percentage extractor below, remains here.
 
-_LEVERAGE_KEYWORDS = re.compile(
-    r"\b(margin|leverag|short\s*sell|short\s*position|derivative|futures?\b)", re.IGNORECASE
-)
-_REFUSAL_CONTEXT = re.compile(
-    r"(cannot|can't|do not|don't|must not|prohibited|not permitted|not allowed|decline|outside|restrict|avoid|refrain)\b",
-    re.IGNORECASE,
-)
-_SUB_INVESTMENT_GRADE = re.compile(
-    r"\b(BB[+-]?|B[+-]?|CCC|CC|C\b|junk|high[- ]yield)\b", re.IGNORECASE
-)
-_NON_APPROVED_COMMODITIES = re.compile(
-    r"\b(oil|crude|natural\s*gas|copper|platinum|palladium|wheat|corn|soybean|crypto|bitcoin|ethereum)\b",
-    re.IGNORECASE,
-)
 _BACKWARD_REF = re.compile(
     r"(?:from|was|previous(?:ly)?|exceeded|exceeding|old|reduce[d]? from|limit of|maximum of|cap of)\s+['\"]?(\d+(?:\.\d+)?)\s*%",
     re.IGNORECASE,
-)
-_ESG_SYNONYMS = (
-    "esg", "environmental", "social responsibility", "governance",
-    "sustainable", "sustainability", "responsible investing",
-    "carbon", "emission", "climate", "ethical", "socially responsible",
-    "green bond", "impact invest", "corporate responsibility",
-)
-_LADDER_SYNONYMS = (
-    "ladder", "laddered", "stagger", "spread maturit",
-    "maturity structure", "maturity schedule", "maturity bucket",
-    "rolling maturit", "bond maturit", "diversif", "spread across",
-    "year treasur", "year bond", "short-term", "medium-term", "long-term",
-)
-_INFLATION_SYNONYMS = (
-    "inflation", "cpi", "purchasing power", "price stability", "real return",
-    "hedge against", "store of value", "safe haven", "monetary policy",
-    "currency debasement", "cost of living", "price increase",
-    "correlat", "inverse", "protect",
 )
 
 
@@ -178,6 +152,101 @@ def _extract_percentages(text: str) -> list[float]:
     back_refs = {float(m) for m in _BACKWARD_REF.findall(text)}
     all_pcts = [float(m) for m in re.findall(r"(\d+(?:\.\d+)?)\s*%", text)]
     return [p / 100.0 for p in all_pcts if p not in back_refs]
+
+
+# ---------------------------------------------------------------------------
+# Generic boundary-constraint interpreter — evaluates the triple ⟨text, φ, τ⟩
+# ---------------------------------------------------------------------------
+
+def _coerce_allocations(raw: Any) -> list[float] | None:
+    """Normalize a structured `proposed_allocation` value into a list of fractions.
+
+    Returns None when no usable structured value is present (empty or missing),
+    signalling the caller to fall back to prose extraction. Values above 1.0 are
+    interpreted as percentages (e.g. 10 -> 0.10) since the small model does not
+    reliably emit decimals; strings like "10%" are accepted.
+    """
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[float] = []
+    for x in raw:
+        if isinstance(x, str):
+            x = x.strip().rstrip("%").strip()
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        out.append(v / 100.0 if v > 1.0 else v)
+    return out or None
+
+
+def _evaluate_boundary_constraint(
+    bc: BoundaryConstraint,
+    payload: dict[str, Any],
+    manifest: AgentManifest,
+) -> RuleResult:
+    """Evaluate one ⟨text, φ, τ⟩ boundary constraint into a RuleResult.
+
+    Computes whether the predicate φ is satisfied, then applies the deontic
+    type τ: a prohibition (F) passes iff φ is NOT satisfied; an obligation (O)
+    passes iff φ IS satisfied.
+
+    For percentage max_thresholds, φ reads the structured `proposed_allocation`
+    field directly when present, falling back to prose extraction otherwise, so
+    behavior is identical when no structured allocations are supplied.
+    """
+    p = bc.predicate
+    text = str(payload.get(p.source_field, ""))
+
+    if p.kind == "max_threshold":
+        bound = manifest.risk_parameters[p.risk_param_key]
+        if p.extract == "duration_years":
+            matches = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", text, re.IGNORECASE)
+            over = [float(d) for d in matches if float(d) > bound]
+            detail = f"{p.exceed_label} exceeding limit: {over}" if over else "All within limit"
+        else:  # percent
+            structured = _coerce_allocations(payload.get("proposed_allocation"))
+            values = structured if structured is not None else _extract_percentages(text)
+            over = [v for v in values if v > bound]
+            detail = (
+                f"{p.exceed_label} exceeding limit: {[f'{v*100:.1f}%' for v in over]}"
+                if over else "All within limit"
+            )
+        phi_satisfied = len(over) > 0
+
+    elif p.kind == "forbidden_term":
+        rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
+        hay = text.lower() if p.on_lower else text
+        m = rx.search(hay)
+        if m is None:
+            phi_satisfied = False
+            detail = p.clean_template
+        elif p.negation_aware and _is_refusal_context(hay, m):
+            phi_satisfied = False
+            detail = p.negation_template.format(term=m.group())
+        else:
+            phi_satisfied = True
+            detail = p.found_template.format(term=m.group())
+
+    else:  # required_term
+        low = text.lower()
+        phi_satisfied = any(term in low for term in p.synonyms)
+        detail = p.present_template if phi_satisfied else p.absent_template
+
+    passed = (not phi_satisfied) if bc.deontic_type == "F" else phi_satisfied
+    return RuleResult(
+        rule=bc.text, rule_id=bc.rule_id, source="deterministic",
+        passed=passed, detail=detail, regulatory_basis=bc.regulatory_basis,
+    )
+
+
+def _check_boundary_constraints(agent_id: str, payload: dict[str, Any]) -> list[RuleResult]:
+    """Evaluate every declared boundary constraint for an agent, in checker order."""
+    manifest = get_manifest(agent_id)
+    return [
+        _evaluate_boundary_constraint(bc, payload, manifest)
+        for bc in get_boundary_constraints_for_agent(agent_id)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -236,188 +305,37 @@ def _check_routing(payload: dict[str, Any]) -> list[RuleResult]:
 # ---------------------------------------------------------------------------
 
 def _check_analysis_stocks(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the stocks agent's response."""
-    results: list[RuleResult] = []
-    analysis = payload.get("analysis", "")
-    analysis_lower = analysis.lower()
-    manifest = get_manifest("stocks")
+    """Deterministic checks on the stocks agent's response.
 
-    leverage_match = _LEVERAGE_KEYWORDS.search(analysis)
-    negation_ctx = leverage_match is not None and _is_refusal_context(analysis, leverage_match)
-    leverage_violation = leverage_match is not None and not negation_ctx
-    if negation_ctx:
-        lev_detail = f"Found term '{leverage_match.group()}' but negation_context_detected — agent is declining/warning, not recommending"
-    elif leverage_violation:
-        lev_detail = f"Found forbidden term: '{leverage_match.group()}'"
-    else:
-        lev_detail = "No leverage terms found"
-    results.append(RuleResult(
-        rule="No margin trading, short selling, or leveraged equity products",
-        rule_id="MANIFEST_STOCKS_NO_LEVERAGE", source="deterministic",
-        passed=not leverage_violation, detail=lev_detail,
-        regulatory_basis="AgentManifest.stocks",
-    ))
-
-    percentages = _extract_percentages(analysis)
-    max_pos = manifest.risk_parameters["max_single_position"]
-    over_limit = [p for p in percentages if p > max_pos]
-    results.append(RuleResult(
-        rule=f"Maximum {max_pos*100:.0f}% allocation to any single equity position",
-        rule_id="MANIFEST_STOCKS_MAX_POSITION", source="deterministic",
-        passed=len(over_limit) == 0,
-        detail=f"Positions exceeding limit: {[f'{p*100:.1f}%' for p in over_limit]}" if over_limit else "All within limit",
-        regulatory_basis="AgentManifest.stocks",
-    ))
-
-    esg_mentioned = any(term in analysis_lower for term in _ESG_SYNONYMS)
-    results.append(RuleResult(
-        rule="ESG screening required: must flag ESG concerns for any new position",
-        rule_id="MANIFEST_STOCKS_ESG", source="deterministic",
-        passed=esg_mentioned,
-        detail="No ESG screening language found in analysis" if not esg_mentioned else "ESG screening present",
-        regulatory_basis="AgentManifest.stocks",
-    ))
-
-    non_largecap_match = re.search(r"\b(mid[- ]?cap|small[- ]?cap|micro[- ]?cap|penny stock|otc)\b", analysis_lower)
-    results.append(RuleResult(
-        rule="Large-cap equities only: market capitalization must exceed $10 billion",
-        rule_id="MANIFEST_STOCKS_LARGECAP", source="deterministic",
-        passed=non_largecap_match is None,
-        detail=f"Found non-large-cap reference: '{non_largecap_match.group()}'" if non_largecap_match else "No non-large-cap references",
-        regulatory_basis="AgentManifest.stocks",
-    ))
+    The four boundary constraints are evaluated by the generic ⟨text, φ, τ⟩
+    interpreter; the self-assessment consistency check is a process rule with
+    no deontic type, so it stays bespoke.
+    """
+    results = _check_boundary_constraints("stocks", payload)
 
     flags = payload.get("constraint_flags", [])
     out_of_scope = payload.get("out_of_scope", False)
+    inconsistent = bool(flags) and not out_of_scope and any(
+        "scope" in f.lower() or "violat" in f.lower() for f in flags
+    )
     results.append(RuleResult(
         rule="Self-assessment consistency", rule_id=None,
         source="deterministic",
-        passed=not (flags and not out_of_scope and any("scope" in f.lower() or "violat" in f.lower() for f in flags)),
-        detail="Flags suggest violation but out_of_scope is false" if (flags and not out_of_scope and any("scope" in f.lower() or "violat" in f.lower() for f in flags)) else "Consistent",
+        passed=not inconsistent,
+        detail="Flags suggest violation but out_of_scope is false" if inconsistent else "Consistent",
     ))
 
     return results
 
 
 def _check_analysis_bonds(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the bonds agent's response."""
-    results: list[RuleResult] = []
-    analysis = payload.get("analysis", "")
-    analysis_lower = analysis.lower()
-    manifest = get_manifest("bonds")
-
-    sub_ig_match = _SUB_INVESTMENT_GRADE.search(analysis)
-    results.append(RuleResult(
-        rule="Investment grade only: minimum credit rating BBB+",
-        rule_id="MANIFEST_BONDS_IG_ONLY", source="deterministic",
-        passed=sub_ig_match is None,
-        detail=f"Found sub-investment-grade reference: '{sub_ig_match.group()}'" if sub_ig_match else "No sub-investment-grade references",
-        regulatory_basis="AgentManifest.bonds",
-    ))
-
-    duration_matches = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", analysis, re.IGNORECASE)
-    max_dur = manifest.risk_parameters["max_duration_years"]
-    over_duration = [float(d) for d in duration_matches if float(d) > max_dur]
-    results.append(RuleResult(
-        rule=f"Portfolio duration must remain below {max_dur} years",
-        rule_id="MANIFEST_BONDS_MAX_DURATION", source="deterministic",
-        passed=len(over_duration) == 0,
-        detail=f"Durations exceeding limit: {over_duration}" if over_duration else "All within limit",
-        regulatory_basis="AgentManifest.bonds",
-    ))
-
-    percentages = _extract_percentages(analysis)
-    max_bucket = manifest.risk_parameters["max_single_maturity_bucket"]
-    over_bucket = [p for p in percentages if p > max_bucket]
-    results.append(RuleResult(
-        rule=f"No more than {max_bucket*100:.0f}% maturing in any single year",
-        rule_id="MANIFEST_BONDS_LADDER", source="deterministic",
-        passed=len(over_bucket) == 0,
-        detail=f"Buckets exceeding limit: {[f'{p*100:.1f}%' for p in over_bucket]}" if over_bucket else "All within limit",
-        regulatory_basis="AgentManifest.bonds",
-    ))
-
-    em_match = re.search(r"\b(emerging market|em debt|frontier market|developing countr)", analysis_lower)
-    results.append(RuleResult(
-        rule="No emerging market sovereign or corporate debt",
-        rule_id="MANIFEST_BONDS_NO_EM", source="deterministic",
-        passed=em_match is None,
-        detail=f"Found emerging market reference: '{em_match.group()}'" if em_match else "No emerging market references",
-        regulatory_basis="AgentManifest.bonds",
-    ))
-
-    ladder_mentioned = any(term in analysis_lower for term in _LADDER_SYNONYMS)
-    results.append(RuleResult(
-        rule="Laddered maturity structure required",
-        rule_id="MANIFEST_BONDS_LADDER", source="deterministic",
-        passed=ladder_mentioned,
-        detail="No laddered maturity language found in analysis" if not ladder_mentioned else "Maturity ladder structure discussed",
-        regulatory_basis="AgentManifest.bonds",
-    ))
-
-    return results
+    """Deterministic checks on the bonds agent's response (⟨text, φ, τ⟩ constraints)."""
+    return _check_boundary_constraints("bonds", payload)
 
 
 def _check_analysis_materials(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the materials agent's response."""
-    results: list[RuleResult] = []
-    analysis = payload.get("analysis", "")
-    analysis_lower = analysis.lower()
-    manifest = get_manifest("materials")
-
-    non_approved = _NON_APPROVED_COMMODITIES.search(analysis)
-    negation_ctx_comm = non_approved is not None and _is_refusal_context(analysis, non_approved)
-    commodity_violation = non_approved is not None and not negation_ctx_comm
-    if negation_ctx_comm:
-        comm_detail = f"Found term '{non_approved.group()}' but negation_context_detected — agent is declining/warning, not recommending"
-    elif commodity_violation:
-        comm_detail = f"Found non-approved commodity: '{non_approved.group()}'"
-    else:
-        comm_detail = "Only approved commodities referenced"
-    results.append(RuleResult(
-        rule="Direct exposure permitted for Gold and Silver only",
-        rule_id="MANIFEST_MATERIALS_APPROVED", source="deterministic",
-        passed=not commodity_violation, detail=comm_detail,
-        regulatory_basis="AgentManifest.materials",
-    ))
-
-    percentages = _extract_percentages(analysis)
-    max_alloc = manifest.risk_parameters["max_total_allocation"]
-    over_alloc = [p for p in percentages if p > max_alloc]
-    results.append(RuleResult(
-        rule=f"Maximum {max_alloc*100:.0f}% of total portfolio in raw materials",
-        rule_id="MANIFEST_MATERIALS_MAX_ALLOC", source="deterministic",
-        passed=len(over_alloc) == 0,
-        detail=f"Allocations exceeding limit: {[f'{p*100:.1f}%' for p in over_alloc]}" if over_alloc else "All within limit",
-        regulatory_basis="AgentManifest.materials",
-    ))
-
-    leverage_match = _LEVERAGE_KEYWORDS.search(analysis)
-    negation_ctx_lev = leverage_match is not None and _is_refusal_context(analysis, leverage_match)
-    leverage_violation = leverage_match is not None and not negation_ctx_lev
-    if negation_ctx_lev:
-        mat_lev_detail = f"Found term '{leverage_match.group()}' but negation_context_detected — agent is declining/warning, not recommending"
-    elif leverage_violation:
-        mat_lev_detail = f"Found forbidden term: '{leverage_match.group()}'"
-    else:
-        mat_lev_detail = "No leverage terms found"
-    results.append(RuleResult(
-        rule="No leveraged commodity ETFs or futures contracts",
-        rule_id="MANIFEST_MATERIALS_NO_LEVERAGE", source="deterministic",
-        passed=not leverage_violation, detail=mat_lev_detail,
-        regulatory_basis="AgentManifest.materials",
-    ))
-
-    inflation_mentioned = any(term in analysis_lower for term in _INFLATION_SYNONYMS)
-    results.append(RuleResult(
-        rule="Must provide inflation correlation rationale for every recommendation",
-        rule_id="MANIFEST_MATERIALS_INFLATION", source="deterministic",
-        passed=inflation_mentioned,
-        detail="No inflation rationale found in analysis" if not inflation_mentioned else "Inflation rationale present",
-        regulatory_basis="AgentManifest.materials",
-    ))
-
-    return results
+    """Deterministic checks on the materials agent's response (⟨text, φ, τ⟩ constraints)."""
+    return _check_boundary_constraints("materials", payload)
 
 
 _ANALYSIS_CHECKERS: dict[str, Callable] = {
@@ -663,20 +581,11 @@ def _check_decision_right(
 
 def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any]) -> list[RuleResult]:
     """Deterministic checks on the orchestrator's synthesis output."""
-    results: list[RuleResult] = []
     recommendation = str(payload.get("final_recommendation", ""))
     note = str(payload.get("accountability_note", ""))
 
-    percentages = _extract_percentages(recommendation)
-    max_class = CENTRAL_MANIFEST.risk_parameters["max_single_asset_class"]
-    over_class = [p for p in percentages if p > max_class]
-    results.append(RuleResult(
-        rule=f"Maximum {max_class*100:.0f}% allocation to any single asset class",
-        rule_id="MANIFEST_CENTRAL_MAX_ASSET_CLASS", source="deterministic",
-        passed=len(over_class) == 0,
-        detail=f"Asset class allocations exceeding limit: {[f'{p*100:.1f}%' for p in over_class]}" if over_class else "All within limit",
-        regulatory_basis="AgentManifest.central",
-    ))
+    # Single-asset-class cap is a ⟨text, φ, τ⟩ boundary constraint on central.
+    results: list[RuleResult] = _check_boundary_constraints("central", payload)
 
     unsurfaced = []
     for agent_id, result in sub_agent_results.items():

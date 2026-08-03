@@ -268,3 +268,264 @@ def get_rule(rule_id: str) -> RegulatoryRule:
     if rule_id not in RULE_REGISTRY:
         raise KeyError(f"Unknown rule_id: {rule_id!r}")
     return RULE_REGISTRY[rule_id]
+
+
+# ===========================================================================
+# Boundary constraints as the triple ⟨text, φ, τ⟩
+# ---------------------------------------------------------------------------
+# Each manifest boundary constraint is materialized as a first-class object
+# carrying its natural-language statement (text), a machine-evaluable
+# predicate (φ, encoded as data in `Predicate`), and a deontic type
+# (τ ∈ {F, O}). The Compliance Agent evaluates φ and applies τ:
+#   passed = (not φ_satisfied) if τ == "F" else φ_satisfied
+# i.e. a prohibition (F) is violated iff the output satisfies φ; an
+# obligation (O) is violated iff it does not. Risk parameters are the
+# quantitative binding of a free variable in φ (via `risk_param_key`).
+# ===========================================================================
+
+# Term vocabularies used by term-based predicates (canonical source).
+ESG_SYNONYMS: list[str] = [
+    "esg", "environmental", "social responsibility", "governance",
+    "sustainable", "sustainability", "responsible investing",
+    "carbon", "emission", "climate", "ethical", "socially responsible",
+    "green bond", "impact invest", "corporate responsibility",
+]
+LADDER_SYNONYMS: list[str] = [
+    "ladder", "laddered", "stagger", "spread maturit",
+    "maturity structure", "maturity schedule", "maturity bucket",
+    "rolling maturit", "bond maturit", "diversif", "spread across",
+    "year treasur", "year bond", "short-term", "medium-term", "long-term",
+]
+INFLATION_SYNONYMS: list[str] = [
+    "inflation", "cpi", "purchasing power", "price stability", "real return",
+    "hedge against", "store of value", "safe haven", "monetary policy",
+    "currency debasement", "cost of living", "price increase",
+    "correlat", "inverse", "protect",
+]
+
+_NEGATION_DETAIL = (
+    "Found term '{term}' but negation_context_detected — "
+    "agent is declining/warning, not recommending"
+)
+
+
+class Predicate(BaseModel):
+    """φ — a machine-evaluable predicate over an agent's candidate output.
+
+    Encoded as data so the Compliance Agent can evaluate it generically.
+    Three kinds cover every manifest boundary constraint:
+      - max_threshold: fail (φ satisfied) if any extracted value exceeds a bound
+      - forbidden_term: φ satisfied if a forbidden term appears (non-negated)
+      - required_term:  φ satisfied if a required disclosure term appears
+    """
+
+    kind: Literal["max_threshold", "forbidden_term", "required_term"]
+    variable: str                          # the subject of φ, e.g. "single_position_allocation"
+    source_field: str = "analysis"         # which payload field carries the output
+
+    # max_threshold
+    risk_param_key: str | None = None      # key into manifest.risk_parameters → the bound
+    extract: Literal["percent", "duration_years"] | None = None
+    exceed_label: str | None = None        # detail prefix, e.g. "Positions", "Durations"
+
+    # forbidden_term
+    term_pattern: str | None = None        # regex source
+    on_lower: bool = False                 # search text.lower() instead of raw text
+    ignorecase: bool = True
+    negation_aware: bool = False           # suppress matches inside a 15-word negation window
+    found_template: str | None = None      # detail when term found (uses {term})
+    clean_template: str | None = None      # detail when no term found
+    negation_template: str | None = None   # detail when found but negated (uses {term})
+
+    # required_term
+    synonyms: list[str] | None = None      # any-present satisfies φ
+    present_template: str | None = None    # detail when present
+    absent_template: str | None = None     # detail when absent
+
+
+class BoundaryConstraint(BaseModel):
+    """The triple ⟨text, φ, τ⟩ — one manifest boundary constraint."""
+
+    rule_id: str                           # links to a RegulatoryRule
+    agent_id: str
+    text: str                              # ⟨text⟩ — natural-language statement
+    predicate: Predicate                   # ⟨φ⟩ — machine-evaluable predicate
+    deontic_type: Literal["F", "O"]        # ⟨τ⟩ — prohibition (F) or obligation (O)
+    regulatory_basis: str
+
+
+BOUNDARY_CONSTRAINTS: list[BoundaryConstraint] = [
+    # ---- Stocks (order preserved from the legacy checker) ----
+    BoundaryConstraint(
+        rule_id="MANIFEST_STOCKS_NO_LEVERAGE", agent_id="stocks",
+        text="No margin trading, short selling, or leveraged equity products",
+        deontic_type="F", regulatory_basis="AgentManifest.stocks",
+        predicate=Predicate(
+            kind="forbidden_term", variable="leverage_instrument",
+            term_pattern=r"\b(margin|leverag|short\s*sell|short\s*position|derivative|futures?\b)",
+            negation_aware=True,
+            found_template="Found forbidden term: '{term}'",
+            clean_template="No leverage terms found",
+            negation_template=_NEGATION_DETAIL,
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_STOCKS_MAX_POSITION", agent_id="stocks",
+        text="Maximum 10% allocation to any single equity position",
+        deontic_type="F", regulatory_basis="AgentManifest.stocks",
+        predicate=Predicate(
+            kind="max_threshold", variable="single_position_allocation",
+            risk_param_key="max_single_position", extract="percent",
+            exceed_label="Positions",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_STOCKS_ESG", agent_id="stocks",
+        text="ESG screening required: must flag ESG concerns for any new position",
+        deontic_type="O", regulatory_basis="AgentManifest.stocks",
+        predicate=Predicate(
+            kind="required_term", variable="esg_disclosure",
+            synonyms=ESG_SYNONYMS,
+            present_template="ESG screening present",
+            absent_template="No ESG screening language found in analysis",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_STOCKS_LARGECAP", agent_id="stocks",
+        text="Large-cap equities only: market capitalization must exceed $10 billion",
+        deontic_type="F", regulatory_basis="AgentManifest.stocks",
+        predicate=Predicate(
+            kind="forbidden_term", variable="market_cap_tier",
+            term_pattern=r"\b(mid[- ]?cap|small[- ]?cap|micro[- ]?cap|penny stock|otc)\b",
+            on_lower=True, ignorecase=False,
+            found_template="Found non-large-cap reference: '{term}'",
+            clean_template="No non-large-cap references",
+        ),
+    ),
+    # ---- Bonds ----
+    BoundaryConstraint(
+        rule_id="MANIFEST_BONDS_IG_ONLY", agent_id="bonds",
+        text="Investment grade only: minimum credit rating BBB+",
+        deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        predicate=Predicate(
+            kind="forbidden_term", variable="credit_rating",
+            term_pattern=r"\b(BB[+-]?|B[+-]?|CCC|CC|C\b|junk|high[- ]yield)\b",
+            found_template="Found sub-investment-grade reference: '{term}'",
+            clean_template="No sub-investment-grade references",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_BONDS_MAX_DURATION", agent_id="bonds",
+        text="Portfolio duration must remain below 10 years",
+        deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        predicate=Predicate(
+            kind="max_threshold", variable="duration_years",
+            risk_param_key="max_duration_years", extract="duration_years",
+            exceed_label="Durations",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds",
+        text="No more than 30% maturing in any single year",
+        deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        predicate=Predicate(
+            kind="max_threshold", variable="single_maturity_bucket",
+            risk_param_key="max_single_maturity_bucket", extract="percent",
+            exceed_label="Buckets",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_BONDS_NO_EM", agent_id="bonds",
+        text="No emerging market sovereign or corporate debt",
+        deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        predicate=Predicate(
+            kind="forbidden_term", variable="emerging_market_debt",
+            term_pattern=r"\b(emerging market|em debt|frontier market|developing countr)",
+            on_lower=True, ignorecase=False,
+            found_template="Found emerging market reference: '{term}'",
+            clean_template="No emerging market references",
+        ),
+    ),
+    # Second obligation carried by the ladder rule: the structure must be present.
+    # Legitimately shares rule_id MANIFEST_BONDS_LADDER (violated_rules dedupes).
+    BoundaryConstraint(
+        rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds",
+        text="Laddered maturity structure required",
+        deontic_type="O", regulatory_basis="AgentManifest.bonds",
+        predicate=Predicate(
+            kind="required_term", variable="ladder_structure",
+            synonyms=LADDER_SYNONYMS,
+            present_template="Maturity ladder structure discussed",
+            absent_template="No laddered maturity language found in analysis",
+        ),
+    ),
+    # ---- Materials ----
+    BoundaryConstraint(
+        rule_id="MANIFEST_MATERIALS_APPROVED", agent_id="materials",
+        text="Direct exposure permitted for Gold and Silver only",
+        deontic_type="F", regulatory_basis="AgentManifest.materials",
+        predicate=Predicate(
+            kind="forbidden_term", variable="commodity_type",
+            term_pattern=r"\b(oil|crude|natural\s*gas|copper|platinum|palladium|wheat|corn|soybean|crypto|bitcoin|ethereum)\b",
+            negation_aware=True,
+            found_template="Found non-approved commodity: '{term}'",
+            clean_template="Only approved commodities referenced",
+            negation_template=_NEGATION_DETAIL,
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_MATERIALS_MAX_ALLOC", agent_id="materials",
+        text="Maximum 15% of total portfolio in raw materials",
+        deontic_type="F", regulatory_basis="AgentManifest.materials",
+        predicate=Predicate(
+            kind="max_threshold", variable="total_materials_allocation",
+            risk_param_key="max_total_allocation", extract="percent",
+            exceed_label="Allocations",
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_MATERIALS_NO_LEVERAGE", agent_id="materials",
+        text="No leveraged commodity ETFs or futures contracts",
+        deontic_type="F", regulatory_basis="AgentManifest.materials",
+        predicate=Predicate(
+            kind="forbidden_term", variable="leverage_instrument",
+            term_pattern=r"\b(margin|leverag|short\s*sell|short\s*position|derivative|futures?\b)",
+            negation_aware=True,
+            found_template="Found forbidden term: '{term}'",
+            clean_template="No leverage terms found",
+            negation_template=_NEGATION_DETAIL,
+        ),
+    ),
+    BoundaryConstraint(
+        rule_id="MANIFEST_MATERIALS_INFLATION", agent_id="materials",
+        text="Must provide inflation correlation rationale for every recommendation",
+        deontic_type="O", regulatory_basis="AgentManifest.materials",
+        predicate=Predicate(
+            kind="required_term", variable="inflation_rationale",
+            synonyms=INFLATION_SYNONYMS,
+            present_template="Inflation rationale present",
+            absent_template="No inflation rationale found in analysis",
+        ),
+    ),
+    # ---- Central (synthesis checkpoint) ----
+    BoundaryConstraint(
+        rule_id="MANIFEST_CENTRAL_MAX_ASSET_CLASS", agent_id="central",
+        text="Maximum 40% allocation to any single asset class",
+        deontic_type="F", regulatory_basis="AgentManifest.central",
+        predicate=Predicate(
+            kind="max_threshold", variable="single_asset_class_allocation",
+            risk_param_key="max_single_asset_class", extract="percent",
+            exceed_label="Asset class allocations",
+            source_field="final_recommendation",
+        ),
+    ),
+]
+
+BOUNDARY_CONSTRAINT_INDEX: dict[str, list[BoundaryConstraint]] = {}
+for _bc in BOUNDARY_CONSTRAINTS:
+    BOUNDARY_CONSTRAINT_INDEX.setdefault(_bc.agent_id, []).append(_bc)
+
+
+def get_boundary_constraints_for_agent(agent_id: str) -> list[BoundaryConstraint]:
+    """Return the ⟨text, φ, τ⟩ boundary constraints for an agent, in checker order."""
+    return BOUNDARY_CONSTRAINT_INDEX.get(agent_id, [])
