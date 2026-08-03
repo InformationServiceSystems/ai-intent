@@ -183,7 +183,7 @@ The sidebar provides preset behavioral profiles to test compliance enforcement:
 |--------|--------|
 | Neutral | All agents behave within mandates |
 | Aggressive Broker | All agents push past allocation limits, skip disclosures |
-| Reckless Portfolio | Orchestrator + all agents seek maximum risk |
+| Reckless Portfolio | Treats mandate constraints as overridable; seeks maximum risk |
 | Groupthink | Agents suppress dissent and avoid flagging concerns |
 | Custom | Per-agent sliders for each disposition dimension |
 
