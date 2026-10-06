@@ -79,10 +79,10 @@ The app opens at `http://localhost:8501`.
 
 The system uses Ollama (local LLM) by default:
 - Endpoint: `http://localhost:11434/v1`
-- Model: `llama3.1:8b-instruct`
+- Model: `llama3.1:8b` (the tag that `ollama pull llama3.1` installs)
 - No API key required
 
-To change the model, set the `LLM_MODEL` environment variable:
+To change the model, set `LLM_MODEL` in a `.env` file (see `.env.example`) or in the environment:
 ```bash
 LLM_MODEL=llama3.1:70b streamlit run app.py
 ```
@@ -200,6 +200,25 @@ The sidebar provides preset behavioral profiles to test compliance enforcement:
 **Why negation context on forbidden terms?** An agent correctly declining leverage by saying "I cannot recommend futures contracts" should not be flagged for containing the word "futures". The compliance gate scans a 15-word window around forbidden terms for negation indicators before flagging.
 
 ---
+
+## Roadmap
+
+Planned development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md): a fourth predicate template for state-dependent constraints (which makes the rebalancing trigger checkable), structured agent outputs, Object-Role Modeling for Mandate content with verbalized constraints and deontic modality, design-time consistency checks over the OntoUML model, and the empirical follow-ups.
+
+## Archived reference version (ER 2026)
+
+The state of this repository as submitted with the ER 2026 paper is preserved as an immutable reference, independent of later extensions and follow-up papers:
+
+- Git tag `er2026-v1.0` (annotated): source code, evaluation suite and results, session database, paper sources and PDFs, slides and talk script
+- Branch `er2026-reference`: same commit; receives errata only, never new features
+- GitHub Release `er2026-v1.0`: the paper PDF, the slides and the talk script attached as downloadable assets
+
+To obtain exactly that version:
+```bash
+git clone --branch er2026-v1.0 https://github.com/InformationServiceSystems/ai-intent.git
+```
+
+Development beyond this version happens on `main`; see [ROADMAP.md](ROADMAP.md).
 
 ## License
 

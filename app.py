@@ -5,6 +5,11 @@ import json
 from uuid import uuid4
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load .env before any agent module is imported, so configuration such as
+# LLM_MODEL is visible to modules that read the environment at import time.
+load_dotenv()
 
 from agents.manifests import DEFAULT_PRINCIPAL, DispositionProfile, ensure_principal
 from agents.orchestrator import run

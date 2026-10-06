@@ -5,16 +5,28 @@ import json
 import os
 import re
 
+from dotenv import load_dotenv
 from openai import OpenAI
 
-DEFAULT_MODEL = os.getenv("LLM_MODEL", "llama3.1:8b-instruct")
+# Load .env here so every entry point (Streamlit app, evaluation runner, ad-hoc
+# scripts) sees LLM_MODEL regardless of import order.
+load_dotenv()
+
+# Must match the tag that `ollama pull llama3.1` installs.
+FALLBACK_MODEL = "llama3.1:8b"
+
+
+def default_model() -> str:
+    """Return the configured model name, read at call time so .env and env overrides apply."""
+    return os.getenv("LLM_MODEL", FALLBACK_MODEL)
+
 
 client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 
 
 def chat(system: str, user: str, model: str | None = None) -> str:
     """Send a system+user message pair to the LLM and return the response text."""
-    model_to_use = model or DEFAULT_MODEL
+    model_to_use = model or default_model()
     response = client.chat.completions.create(
         model=model_to_use,
         messages=[
