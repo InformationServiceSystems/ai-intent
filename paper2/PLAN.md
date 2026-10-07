@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| First full campaign (10 runs, HPC) | `evaluation/ufo_hpc_p*_results_*.json`, `evaluation/sessions/ufo_hpc_*` | `paper2/e2-e3-results.md`, `paper2/e2-e3-notes.md` | done 7 Oct 2026 |
 | Runner persistence and E2/E3 fields | `evaluation/runner.py`, `evaluation/paper2_analysis.py` | writes `evaluation/sessions/*.json|ttl`, `paper2/e2-e3-results.md` | implemented, dry run passed |
 | Verdict provenance | `agents/compliance.py` | `message_id` now names the evaluated action | implemented |
 

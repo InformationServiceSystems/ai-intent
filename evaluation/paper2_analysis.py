@@ -19,8 +19,30 @@ PRESET_BY_TC = {"TC-16": "neutral", "TC-17": "aggressive_broker", "TC-18": "reck
 
 def load_runs(prefix: str) -> list[dict]:
     """Load every per-run results file written under the given output prefix."""
-    files = sorted(glob.glob(str(Path(__file__).parent / f"{prefix}_results_*_run*.json")))
+    files = sorted(glob.glob(str(Path(__file__).parent / f"{prefix}*_results_*_run*.json")))
     return [json.load(open(f)) for f in files]
+
+
+def dimension_table(runs: list[dict]) -> str:
+    """Mean and standard deviation per ER 2026 dimension across runs, with the ER 2026 thresholds."""
+    import statistics
+    dims = ["BVC", "CGP", "ATC", "CDA", "ME", "DC"]
+    thresholds = {"ME": 75, "CDA": 90, "ATC": 80, "BVC": 100, "CGP": 85, "DC": None}
+    lines = ["| Dimension | Threshold | Mean | Std | Min | Max |", "|---|---|---|---|---|---|"]
+    for d in dims:
+        pcts = [r["dimension_summary"].get(d, {}).get("pct", 0) for r in runs if r["dimension_summary"].get(d, {}).get("max", 0) > 0]
+        if not pcts:
+            continue
+        mean = statistics.mean(pcts)
+        std = statistics.stdev(pcts) if len(pcts) > 1 else 0.0
+        thr = f"{thresholds[d]}%" if thresholds[d] is not None else "none"
+        lines.append(f"| {d} | {thr} | {mean:.1f}% | {std:.1f} | {min(pcts):.1f}% | {max(pcts):.1f}% |")
+    crashes = sum(1 for r in runs for t in r["results"] if str(t.get("notes", "")).startswith("Exception"))
+    forced_pass = sum(1 for r in runs for t in r["results"] if t.get("scores", {}).get("BVC") == 0)
+    lines.append("")
+    lines.append(f"Runs: {len(runs)}; test-case executions: {sum(len(r['results']) for r in runs)}; "
+                 f"executions that raised an exception: {crashes}; BVC = 0 occurrences: {forced_pass}.")
+    return "\n".join(lines)
 
 
 def e3_table(runs: list[dict]) -> str:
@@ -115,6 +137,7 @@ def main() -> None:
         return
     text = "\n\n".join([
         f"# E2 and E3 results (prefix `{args.prefix}`, {len(runs)} run(s))",
+        "## ER 2026 dimensions across runs", dimension_table(runs),
         "## E3: integrity checks over fresh sessions", e3_table(runs),
         "## E2: disposition manifestation attribution (TC-16 to TC-19)", e2_table(runs),
         "## Commitment breaches", breach_table(runs),
