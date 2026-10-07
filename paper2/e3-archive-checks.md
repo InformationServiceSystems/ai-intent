@@ -22,6 +22,10 @@ Graph size per session: 132 to 2312 triples, mean 1100. Export and all eight que
 - **Q6 fails in two sessions.** One is a test session; the other predates the Compliance Agent entirely and has no verdicts at all. Both are correctly reported as traces in which Proposed Actions were never evaluated.
 - **Q8 exposed a real gap.** The gate applied five disposition-integrity rules (`DISPOSITION_*`) that were defined in `agents/compliance.py` but never registered in `agents/regulatory_rules.py`. A verdict could therefore name a rule that the agent's commitment did not cover. The five rules are now registered and apply to the three sub-agents, so new commitments cover them. The one failing session was run before the registration and keeps its original commitment in the log, as it should.
 
+## Confirmation on a fresh session
+
+After the registration, one further live session under the `reckless_portfolio` preset (session `55941fc8`, three sub-agents consulted, four revisions, no block) passed all eight checks, Q8 included. Eleven manifestations were attributed across the three agents; two of them name the newly registered rules `DISPOSITION_OVERCONFIDENT_FLAGS` and `DISPOSITION_RISK_BOUNDARY`, which the agents' commitments now cover.
+
 ## Two export corrections the checks forced
 
 1. Verdicts at the routing and synthesis checkpoints are logged as `compliance.block.routing` and `compliance.block.synthesis`. The export now maps both to the central agent; before, they inhered in a non-existent agent and Q1 and Q3 reported them.
