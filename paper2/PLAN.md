@@ -64,7 +64,7 @@ The export reads nothing but the MCP log, in keeping with the invariant that the
 - Target venue: **ER 2027** (decided 7 October 2026). LNCS, 14 pages plus references, same format as the ER 2026 paper.
 - Whether to align `aii:` with PROV-O (`prov:Activity`, `prov:wasInformedBy`) in addition to gUFO. Alignment widens tool support; it also lengthens the paper.
 - Whether E2 should use llama3.1:8b for continuity with ER 2026, or a more capable model so that rejections are rarer and attribution is tested on harder cases.
-- Decided 7 October 2026: a third campaign with deterministic routing for the evaluation (ROADMAP item 4) runs after the paper draft is written, not before.
+- Decided 7 October 2026: a third campaign with deterministic routing for the evaluation (ROADMAP item 4) runs after the paper draft is written, not before. The override is implemented (commit 637c61c): `run_parallel.py --deterministic-routing --prefix ufo_hpc3`; it waits for the author's review of the draft.
 
 ## 8. Risks
 
