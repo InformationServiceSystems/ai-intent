@@ -69,7 +69,7 @@ ORM addresses this at design time, with three properties the current encoding la
 
 ## 4. Platform items
 
-- **Deterministic routing for evaluation.** The orchestrator routes non-deterministically, which leaves Mandate Enforcement (ME) untestable in sessions where the target agent is not invoked. Add a routing override for the evaluation runner so that out-of-scope test cases always reach their target agent, and report ME both with and without the override.
+- **Deterministic routing for evaluation.** Done 7 October 2026 (`runner.py --deterministic-routing`): the harness fixes the routing to the test case's expected agents; the override is logged and still passes the routing checkpoint. ME is reported without the override (campaigns one and two) and with it (campaign three, pending).
 - **Accountability note as a projection of the trace.** Generate the human-readable accountability note from the Accountability Trace rather than asking the model to write it, so that trace completeness (ATC) no longer depends on instruction following.
 
 ## 5. Follow-up paper: substantive use of UFO
