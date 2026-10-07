@@ -26,13 +26,17 @@ An Ontological Account of Accountable Delegation\\
 in Multi-Agent AI Systems}
 \titlerunning{Commitments, Dispositions and Traces}
 
-\author{\todo{authors}}
-\institute{\todo{institute}}
+\author{Wolfgang Maass\inst{1} \and Iris Reinhartz-Berger\inst{2}}
+\authorrunning{W.~Maass and I.~Reinhartz-Berger}
+\institute{German Research Center for Artificial Intelligence (DFKI)\\
+and Saarland University, Saarbr\"ucken, Germany\\
+\email{wolfgang.maass@dfki.de}
+\and University of Haifa, Haifa, Israel}
 
 \maketitle
 
 \begin{abstract}
-\todo{150 words. Three open questions left by AI-Intent (ER 2026): accountable to whom, what a disposition is formally, and whether an auditor can query a trace without reading code. UFO-C commitments and claims, UFO dispositions and a gUFO export answer them. Reference implementation; evaluation E1 to E4; two corrections to the earlier grounding.}
+AI-Intent is a conceptual modeling framework for multi-agent AI systems in which every agent acts under a Mandate, a Compliance Agent enforces the Mandate before any message is delivered, and the resulting trace is the evidence of what happened. Its first evaluation showed that the gate contains boundary violations even under adversarial agent dispositions. Three questions remained open: to whom an agent is accountable when it breaches its Mandate, what an agent disposition is as a model construct, and whether an auditor can verify a trace without reading the enforcement code. This paper answers all three by using the Unified Foundational Ontology as model content rather than as a classification scheme. Delegation becomes a relator constituted by a UFO-C commitment and claim, with a containment condition over the delegation chain and a resolution of every breach to the parties answerable for it. Dispositions become intrinsic modes with degree, triggering situation and characteristic rule set, manifested in compliance rejections. Traces become gUFO-typed graphs over which eight framework invariants are stated as SPARQL queries. A reference implementation and a campaign of 190 evaluations show that the invariants hold on every session and that two of them exposed rules the gate enforced without any agent having committed to them. Four corrections to the earlier ontological grounding are stated.
 \keywords{Conceptual modeling \and UFO \and Multi-agent systems \and Accountability \and Delegation \and Dispositions}
 \end{abstract}
 
@@ -40,16 +44,23 @@ in Multi-Agent AI Systems}
 \section{Introduction}
 \label{sec:intro}
 %=====================================================================
-\todo{Recall AI-Intent in four sentences: Mandate, Intent Enforcement, Accountability Trace; Compliance Agent as a gate; zero forced-pass over 190 evaluations.}
+Language-model agents that act on behalf of people need governance that can be modeled, enforced and audited. \textsc{AI-Intent}~\cite{maass2026aiintent} proposes three constructs for this purpose. A \emph{Mandate} declares what an agent may address and what it must never produce, as boundary constraints that are triples of a natural-language statement, a decidable predicate and a deontic type. \emph{Intent Enforcement} is realized by a Compliance Agent that evaluates every message before delivery and returns a revision directive or, after a bounded number of revisions, drops the message. The \emph{Accountability Trace} is the log of every message and every verdict, from which a session can be reconstructed. The first evaluation of the framework, 190 sessions of a multi-agent investment system driven by a small open model, found that agents breach their own constraints on the first attempt in a substantial share of sessions and that the gate nevertheless delivered no non-compliant message, including under presets that instruct agents to treat their constraints as negotiable.
 
-\todo{State the three questions the ER 2026 paper leaves open.}
+The framework was grounded in the Unified Foundational Ontology (UFO)~\cite{guizzardi2005ontological} by assigning each of its nine constructs a UFO category. That grounding was used for classification and for the entailments of the categories at design time. It left three questions open, and each is a question a regulator would ask.
+
 \begin{enumerate}
-  \item Accountable to whom? The trace records events; the model has no normative relation between delegator and delegatee.
-  \item What is a disposition? Presets are prompt text and a score; manifestation is undefined.
-  \item Can a regulator query a trace? Integrity conditions live in scoring code.
+  \item \emph{Accountable to whom?} The trace records what happened. The model has no normative relation between the party that delegates and the party that acts, so a breach has a record but no answerable party.
+  \item \emph{What is a disposition?} The evaluation stressed the gate with agent dispositions, but a disposition was a vector of numbers and a sentence prepended to a prompt. The model did not say what it means for a disposition to be manifested.
+  \item \emph{Can a trace be verified without reading code?} The invariants that make the trace trustworthy, such as that no blocked output is ever delivered, were enforced by scoring functions in the evaluation harness, not stated in a form an auditor could run.
 \end{enumerate}
 
-\todo{Claim: UFO-C, UFO-A/B and gUFO answer them, and the answers are implementable. Contributions C1 to C4 as in PLAN.md. Paper outline.}
+This paper argues that UFO answers all three when it is used as model content rather than as a classification scheme, and that the answers are implementable in the existing reference system. The contributions are as follows.
+\begin{itemize}
+  \item A UFO-C account of delegation: a Delegation is a relator constituted by a Commitment of the delegatee and a Claim of the delegator, the Mandate is the content of the Commitment, a containment condition over the delegation chain is decidable at design time, and every forced block resolves to the chain of answerable parties up to the Principal (Section~\ref{sec:delegation}).
+  \item A UFO account of agent dispositions as intrinsic modes with bearer, degree, triggering situation and characteristic rule set, with a deterministic notion of manifestation that restates the earlier Disposition Containment metric as a claim about dispositions and the gate (Section~\ref{sec:dispositions}).
+  \item An export of sessions as gUFO-typed graphs, built from the log alone, and eight framework invariants stated as SPARQL queries whose result sets must be empty (Section~\ref{sec:traces}).
+  \item An implementation and a campaign of 190 evaluations on which the invariants hold on every session, and in which one invariant twice exposed rules the gate enforced without any agent having committed to them (Section~\ref{sec:evaluation}); and four corrections to the earlier grounding that the formalisation forced (Section~\ref{sec:corrections}).
+\end{itemize}
 
 %=====================================================================
 \section{Background}
@@ -57,11 +68,36 @@ in Multi-Agent AI Systems}
 %=====================================================================
 \subsection{UFO in the extent needed}
 \label{sec:ufo}
-\todo{Endurants and perdurants; modes inhere in endurants; extrinsic modes externally depend on other individuals; relators mediate; events are non-repeatable and bring about situations; dispositions are intrinsic modes manifested in events when a triggering situation obtains. UFO-C: social commitments and claims, relators constituted by them. gUFO as the OWL rendering: classes and properties used here (\code{gufo:Relator}, \code{gufo:ExtrinsicMode}, \code{gufo:IntrinsicMode}, \code{gufo:Event}, \code{gufo:Situation}, \code{gufo:inheresIn}, \code{gufo:externallyDependsOn}, \code{gufo:mediates}, \code{gufo:historicallyDependsOn}, \code{gufo:manifestedIn}, \code{gufo:broughtAbout}).}
+UFO~\cite{guizzardi2005ontological,guizzardi2013events} distinguishes endurants, which persist in time and may change, from perdurants, which happen. Objects are endurants that exist independently; aspects are endurants that exist only in something else. An intrinsic mode inheres in exactly one individual; an extrinsic mode inheres in one individual and is existentially dependent on another; a relator mediates two or more individuals and is constituted by their mutually dependent modes. Events are non-repeatable perdurants that bring about situations, and a situation is a configuration of endurants at a time. A disposition is an intrinsic mode that is manifested in an event when a triggering situation obtains; it may exist without ever being manifested. UFO-C, the social layer~\cite{guizzardi2008ufoc,nardi2015commitment}, adds commitments and claims as social modes: a commitment of $a$ towards $p$ is an extrinsic mode of $a$ dependent on $p$, its counterpart claim is a mode of $p$ dependent on $a$, and a social relator is constituted by such pairs. gUFO~\cite{almeida2019gufo} renders UFO-A and UFO-B as an OWL vocabulary; the present work uses \code{gufo:Event}, \code{gufo:Situation}, \code{gufo:Relator}, \code{gufo:IntrinsicMode}, \code{gufo:ExtrinsicMode}, \code{gufo:FunctionalComplex} and the properties \code{inheresIn}, \code{externallyDependsOn}, \code{mediates}, \code{historicallyDependsOn}, \code{manifestedIn}, \code{broughtAbout}, \code{participatedIn} and \code{isEventProperPartOf}. gUFO does not render UFO-C; commitments and claims are therefore typed as extrinsic modes and the Delegation as a relator, which is what UFO-C makes them, without a dedicated class.
 
 \subsection{AI-Intent}
 \label{sec:aiintent}
-\todo{The nine constructs and their ER 2026 grounding (table). Note what the present paper changes: the Compliance Verdict row and the Src column, see Section~\ref{sec:corrections}.}
+Table~\ref{tab:grounding} lists the nine constructs of \textsc{AI-Intent} with their grounding as revised in this paper. The column \emph{UFO fixes} states whether the UFO category fixes the construct's formal behaviour completely (\emph{full}) or only frames it while the framework supplies the content (\emph{part}); Section~\ref{sec:corrections} explains why this replaces the earlier distinction between derived and designed constructs, and why the Compliance Verdict and the Intent Scope rows changed.
+
+\begin{table}[t]
+\centering
+\caption{Grounding of the \textsc{AI-Intent} constructs, revised. Rows marked $\dagger$ differ from the ER 2026 version.}
+\label{tab:grounding}
+\begin{tabularx}{\textwidth}{@{}lXc@{}}
+\toprule
+\textbf{Construct} & \textbf{UFO category} & \textbf{UFO fixes} \\
+\midrule
+Principal & Intentional object, \uml{kind} & part \\
+Agent & Intentional object with dispositions, \uml{kind} & full \\
+Mandate & Normative description; content of a Commitment (this paper) & part \\
+Intent Scope$^\dagger$ & Classification criterion over Proposed Actions & part \\
+Boundary Constraint & Negative duty, \uml{mode} & part \\
+Proposed Action & Event, non-repeatable, \uml{event} & full \\
+Compliance Verdict$^\dagger$ & Intrinsic mode of the target Agent, historically dependent on the Proposed Action & full \\
+Log Entry & Event record, \uml{event} & full \\
+Accountability Trace & Situation brought about by the session, \uml{situation} & full \\
+Regulatory Framework & External normative description & part \\
+\midrule
+Delegation (new) & Relator constituted by Commitment and Claim (UFO-C) & full \\
+Disposition (new) & Intrinsic mode with degree, manifested in events & full \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 %=====================================================================
 \section{Delegation as Commitment and Claim}
@@ -128,7 +164,24 @@ A \emph{Disposition} is a tuple $\delta = \langle k, a, g, S_k, R_k\rangle$ with
 Let $e$ be a compliance rejection or block event in session $s$ that targets agent $a$ and names violated rules $V_e$. $e$ is a \emph{manifestation} of $\delta = \langle k, a, g, S_k, R_k\rangle$ if $g > \theta$ and $V_e \cap R_k \neq \emptyset$. The attributed rules of the manifestation are $V_e \cap R_k$.
 \end{definition}
 
-The threshold $\theta$ is $0.5$ in the implementation and the comparison is strict; the neutral preset's degrees of $0.1$, and its conformist degree of exactly $0.5$, lie at or below it, so under the neutral preset no rejection is ever attributed to a disposition. The characteristic rule sets encode what each kind of pressure is expected to produce: a risk-seeking agent breaches caps and leverage prohibitions, an overconfident one omits required disclosures, a conformist one follows another agent out of its own scope. Table~\ref{tab:kinds} lists the sets. \todo{table from MANIFESTATION\_MAP with one-line justification per kind}
+The threshold $\theta$ is $0.5$ in the implementation and the comparison is strict; the neutral preset's degrees of $0.1$, and its conformist degree of exactly $0.5$, lie at or below it, so under the neutral preset no rejection is ever attributed to a disposition. The characteristic rule sets encode what each kind of pressure is expected to produce: a risk-seeking agent breaches caps and leverage prohibitions, an overconfident one omits required disclosures, a conformist one follows another agent out of its own scope. Table~\ref{tab:kinds} lists the sets.
+
+\begin{table}[t]
+\centering
+\caption{Disposition kinds, triggering situations and characteristic rule sets. Rule identifiers refer to the registry of the reference implementation; \code{DISPOSITION\_*} rules are the gate's own integrity checks for the kind.}
+\label{tab:kinds}
+\begin{tabularx}{\textwidth}{@{}lXX@{}}
+\toprule
+\textbf{Kind} & \textbf{Triggering situation} & \textbf{Characteristic rules} \\
+\midrule
+risk-seeking & a Proposed Action whose allocation, duration or exposure approaches a cap & position and allocation caps, duration cap, leverage prohibitions, suitability, boundary hugging \\
+self-serving & a Proposed Action that enlarges the agent's own position or authority & position and allocation caps, suitability, decision right, scope creep \\
+overconfident & a Proposed Action that asserts a recommendation without required disclosures & rationale, ESG screening, inflation rationale, duration warning, accountability note, flag suppression \\
+anti-customer & a Proposed Action that prefers complexity, leverage or low credit quality & leverage prohibitions, investment-grade floor, no emerging markets, ladder, complexity bias \\
+conformist & a Proposed Action that follows another agent's view out of the agent's scope & out-of-scope recommendation, approved universe, large-cap floor, approved commodities, surfacing violations, suppressed dissent \\
+\bottomrule
+\end{tabularx}
+\end{table}
 
 Attribution is deterministic and reads only the log: after the sub-agent calls complete, the orchestrator scans the session's rejection and block events, applies Definition~\ref{def:manifestation} for every Disposition the agent bears, and records the result as \code{disposition.manifest.\{a\}}. A rejection may manifest several dispositions at once, which is as it should be; a cap breach by a reckless agent is both risk-seeking and self-serving.
 
@@ -213,17 +266,36 @@ Q2 is the claim that gives AI-Intent its name for bounded autonomy, now readable
 \section{Reference Implementation and Evaluation}
 \label{sec:evaluation}
 %=====================================================================
-\todo{Modules and hooks (PLAN.md Section 4). E1 containment; E2 attribution agreement over TC-16 to TC-19; E3 invariants over regenerated sessions, with the 21 surviving archived sessions as the before-hooks comparison (e3-archive-checks.md); E4 cost: triples per session and query time.}
+\paragraph{Implementation.}
+The constructs of Sections~\ref{sec:delegation} to~\ref{sec:traces} are implemented in the \textsc{AI-Intent} reference system, a Streamlit application with an orchestrator, three specialist agents (equities, fixed income, commodities), a Compliance Agent with a registry of thirty rules, and a SQLite log.\footnote{\todo{repository URL}; the ER 2026 state is preserved as tag \code{er2026-v1.0}.} The delegation chain is built from the Mandate registry and logged at session start; forced blocks are resolved to breach records; manifestations are attributed from the log after the specialist calls; every verdict now carries the log id of the action it evaluated. The export and the eight queries read the log and nothing else. The model is llama3.1 with 8 billion parameters served by Ollama, as in the earlier evaluation, so that the two campaigns differ only in the constructs added.
 
-\todo{Finding from Q8: five disposition-integrity rules applied by the gate were absent from the registry and hence from every commitment; registered after the finding. State this as an example of the checks catching a specification gap that the ER 2026 evaluation could not see.}
+\paragraph{Design.}
+Four evaluations address the three research questions. \emph{E1} mutates every bounded sub-mandate parameter to the parent's bound and to 50, 100 and 150 percent above it, and checks that containment reports exactly the mutations above the bound. \emph{E2} runs the four disposition test cases of the earlier protocol (neutral, aggressive broker, reckless portfolio manager, groupthink) and compares the kinds attributed to each rejection with the preset in force; the attribution is correct if the preset gives the agent a degree above the threshold for the attributed kind. \emph{E3} runs the full protocol of 19 test cases ten times, exports every session, and runs the eight queries on each. \emph{E4} records graph size and query time per session. The campaign ran on one A100 node of a university cluster with ten runner processes in parallel; the 190 sessions took about fifty minutes.
 
-\todo{Results tables from paper2/e2-e3-results.md. Threats to validity: rule-set attribution is a modelling decision; model dependence; the regenerated sessions are not the ER 2026 sessions.}
+\paragraph{Results.}
+\todo{E1: 10 mutations, 0 misjudged (paper2/e1-containment.md). E2, E3, E4 tables from the second campaign (prefix ufo\_hpc2) once it completes; first campaign (ufo\_hpc) as the source of the two Q8 findings.}
+
+\paragraph{What the invariants found.}
+Q8 states that a rule a verdict names against an agent must belong to that agent's Commitment. It failed twice, and both failures were specification gaps rather than gate failures. Before the campaign, a live session under the reckless preset produced verdicts naming five disposition-integrity rules that the Compliance Agent implemented but the registry did not contain, so no Commitment covered them. During the campaign, one routing block named the out-of-scope rule against the orchestrator although the registry listed the rule for the three specialists only. In both cases the gate enforced a rule that no agent had committed to. The earlier evaluation could not see this: its scorer looked up rule identifiers in verdicts, not in commitments. Both gaps were closed by registering the rules, which is the correct repair, since the rules were right and the registry was incomplete.
+
+\paragraph{Threats to validity.}
+The characteristic rule sets of Table~\ref{tab:kinds} are a modelling decision; a different partition would attribute differently, and E2 can only show that attribution agrees with the preset, not that the partition is the right one. The regenerated sessions are not the sessions of the earlier campaign, whose logs were not preserved; the comparison in Table~\ref{tab:dims} \todo{add table} is between campaigns under the same protocol and model, not between the same sessions. All results are for one small model; a more capable model would produce fewer rejections and therefore fewer manifestations, which would make E2 less informative but would not affect E1, E3 or E4.
 
 %=====================================================================
 \section{Related Work}
 \label{sec:related}
 %=====================================================================
-\todo{UFO-C commitments and claims; service ontologies built on them. Delegation in Tropos and GAIA. Norm representations: LegalRuleML, ODRL. Provenance: PROV-O as the nearest standard to the trace export; argue what gUFO adds (modes, relators, dispositions) and what PROV-O adds (tooling), and whether to align.}
+\paragraph{Commitments in UFO-C.}
+Commitments and claims as social modes constituting relators are the core of UFO-C~\cite{guizzardi2008ufoc}, and the commitment-based reference ontology for services~\cite{nardi2015commitment} shows the pattern at scale: a service offering is a relator of commitments and claims between provider and customer. The present paper applies the same pattern to delegation between a Principal and the agents that act for it, with the Mandate as the content of the commitment. The novelty is not the pattern but its use for runtime accountability: the breach of a commitment is a logged situation with answerable parties, and the query Q3 checks that no breach lacks one.
+
+\paragraph{Delegation in agent-oriented modeling.}
+$i^*$~\cite{yu2011social} and Tropos~\cite{bresciani2004tropos} model dependencies between actors for goals, tasks and resources; a delegation is a dependency in which the depender relies on the dependee. GAIA~\cite{wooldridge2000gaia} assigns responsibilities to roles. Normative multi-agent systems~\cite{boella2006introduction,dignum1999autonomous} add obligations and prohibitions. None of these gives the delegation itself a normative structure with a breach semantics; the UFO-C reading does, and it is what makes accountability resolvable from a trace.
+
+\paragraph{Norm representations and regulation.}
+LegalRuleML~\cite{athan2013legalruleml} and ODRL~\cite{odrl2018} represent norms and policies for machine processing; defeasible deontic logic~\cite{governatori2007characterising} supplies exception structure that \textsc{AI-Intent} deliberately omits for regulated finance. These are candidates for expressing the content of a Mandate; the present paper is concerned with the status of the Mandate as the content of a commitment, which is orthogonal to its representation language. The regulatory basis of the rules remains MiFID~II~\cite{mifid2014} and the EU AI Act~\cite{euaiact2024}.
+
+\paragraph{Provenance.}
+PROV-O~\cite{provo2013} is the nearest standard to the trace export: activities, entities and agents with derivation and attribution relations. gUFO adds what PROV-O lacks for the present purpose, namely modes, relators, dispositions and situations, which are exactly the constructs Sections~\ref{sec:delegation} and~\ref{sec:dispositions} need. PROV-O adds tooling and interoperability. An alignment, mapping Log Entries to \code{prov:Activity}, Proposed Actions to \code{prov:Entity} and the historical dependence of a verdict to \code{prov:wasInformedBy}, is straightforward and is left to future work.
 
 %=====================================================================
 \section{Corrections to the Earlier Grounding}
@@ -247,7 +319,9 @@ gUFO renders UFO-A and UFO-B and does not include the normative descriptions of 
 \section{Conclusion}
 \label{sec:conclusion}
 %=====================================================================
-\todo{Answers to RQ1 to RQ3. What UFO contributes beyond categorisation. Future work: PROV-O alignment, defeasible commitments, Mandate as normative description.}
+The ER 2026 paper used UFO to classify the constructs of \textsc{AI-Intent}. This paper uses UFO to say what the constructs are, and the difference is consequential. Delegation as a relator of commitment and claim gives a breach an answerable party, which is what accountability means. Dispositions as intrinsic modes with manifestations turn a stress test into a statement about what showed and what the gate contained. Traces as gUFO situations make the framework's invariants into queries a regulator can run, and two of those queries found rules the gate enforced without any commitment behind them, a class of specification gap the earlier evaluation could not detect. The reference implementation realizes all three accounts, and a campaign of 190 sessions satisfies every invariant on every session once the gaps are closed.
+
+Three directions follow. The Mandate deserves a class of its own with the reading of a normative description, since gUFO has none. Commitments could be made defeasible for domains in which exceptions are themselves regulated activities. And an alignment of the trace export with PROV-O would open the traces to existing provenance tooling without giving up the modes and relators that carry the accountability structure.
 
 \bibliographystyle{splncs04}
 \bibliography{../paper/bibliography,bibliography2}
