@@ -93,8 +93,15 @@ async def run(
     system_prompt_modifier: str = "",
     compliance_multiplier: float = 1.0,
     principal_id: str = "anonymous",
+    routing_override: dict[str, Any] | None = None,
 ) -> OrchestrationResult:
-    """Execute the full orchestration pipeline for a user query."""
+    """Execute the full orchestration pipeline for a user query.
+
+    routing_override, when given, replaces the model's routing decision with a
+    fixed one (used by the evaluation to make out-of-scope cases reach their
+    target agent). The override is still logged as intent.route and still
+    passes the routing checkpoint of the Compliance Agent.
+    """
     query_clean = (query or "").strip()
     if not query_clean:
         raise ValueError("Query must be a non-empty string")
@@ -156,7 +163,9 @@ async def run(
     logger.log(build_message(session_id, "internal", "user", "central", "user.query", {"query": query_clean}))
 
     # Step B — Routing call → routed through compliance (CP1)
-    routing = await _route_with_compliance(system_prompt, query_clean, session_id, compliance, all_verdicts)
+    routing = await _route_with_compliance(
+        system_prompt, query_clean, session_id, compliance, all_verdicts, routing_override=routing_override,
+    )
 
     agents_to_call = routing.get("agents_to_call", [])
     routing_rationale = routing.get("routing_rationale", "")
@@ -370,10 +379,33 @@ async def run(
 async def _route_with_compliance(
     system_prompt: str, query: str, session_id: str,
     compliance: Any, all_verdicts: list[ComplianceVerdict],
+    routing_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run routing call with CP1 compliance gate and retry loop."""
     logger = get_logger()
     max_retries = 2
+
+    if routing_override is not None:
+        # Deterministic routing: no model call, one pass through the gate, no retries.
+        routing = {
+            "routing_rationale": routing_override.get(
+                "routing_rationale", "Deterministic routing supplied by the evaluation harness"),
+            "agents_to_call": list(routing_override.get("agents_to_call", [])),
+            "routing_mode": "override",
+        }
+        for agent_id in routing["agents_to_call"]:
+            routing[f"query_for_{agent_id}"] = routing_override.get(f"query_for_{agent_id}", query)
+        logger.log(build_message(session_id, "internal", "central", "central", "intent.route", routing))
+        verdict = await compliance.evaluate_routing(routing, session_id)
+        all_verdicts.append(verdict)
+        if not verdict.approved:
+            verdict.overall_status = "forced_block"
+            logger.log(build_message(
+                session_id, "internal", "compliance", "central", "compliance.block.routing",
+                {"reason": "Routing override rejected by compliance", "violated_rules": verdict.violated_rules},
+                "forced_block",
+            ))
+        return routing
 
     for attempt in range(max_retries + 1):
         routing_prompt = system_prompt + ROUTING_INSTRUCTION

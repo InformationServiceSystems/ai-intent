@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11435/v1"))
     parser.add_argument("--dry-run", action="store_true", help="pass --dry-run to every worker")
     parser.add_argument("--stagger", type=float, default=3.0, help="seconds between worker starts")
+    parser.add_argument("--deterministic-routing", action="store_true", help="pass --deterministic-routing to every worker")
     args = parser.parse_args()
 
     logs = ROOT / "evaluation" / "logs"
@@ -35,6 +36,8 @@ def main() -> int:
         cmd = [sys.executable, "evaluation/runner.py", "--runs", "1", "--output-prefix", f"{args.prefix}_p{i}"]
         if args.dry_run:
             cmd.append("--dry-run")
+        if args.deterministic_routing:
+            cmd.append("--deterministic-routing")
         log = open(logs / f"{args.prefix}_p{i}.log", "w")
         procs.append((i, subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)))
         print(f"worker {i}: pid {procs[-1][1].pid} -> {log.name}")

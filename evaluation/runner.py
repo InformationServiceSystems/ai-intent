@@ -20,6 +20,11 @@ from evaluation.sparql_checks import run_checks
 
 SESSIONS_DIR = Path(__file__).parent / "sessions"
 
+# Set by --deterministic-routing: every test case is routed to its expected agents
+# instead of letting the model decide, so Mandate Enforcement is measured on every
+# out-of-scope case. The override still passes the routing checkpoint.
+DETERMINISTIC_ROUTING = False
+
 
 def persist_session(tc_id: str, session_id: str, messages: list, result: Any, prefix: str = "") -> dict[str, Any]:
     """Write the session's MCP log and gUFO graph to evaluation/sessions and return its integrity-check summary."""
@@ -488,12 +493,19 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
     start = time.time()
 
     try:
+        routing_override = None
+        if DETERMINISTIC_ROUTING and tc.get("expected_routing"):
+            routing_override = {
+                "routing_rationale": f"Deterministic routing for {tc_id}: {tc['expected_routing']}",
+                "agents_to_call": list(tc["expected_routing"]),
+            }
         result = asyncio.run(orchestrator_run(
             query, session_id,
             dispositions=dispositions,
             preset_name=preset_name,
             system_prompt_modifier=system_prompt_modifier,
             compliance_multiplier=compliance_multiplier,
+            routing_override=routing_override,
         ))
     except Exception as e:
         elapsed = time.time() - start
@@ -594,6 +606,7 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
             for b in result.commitment_breaches
         ],
         "containment_all_ok": all(c["contained"] for c in result.containment_checks),
+        "routing_mode": "override" if DETERMINISTIC_ROUTING else "model",
     }
 
 
@@ -995,9 +1008,32 @@ def run_single_suite(cases: list[dict], run_index: int, out_dir: Path, output_pr
     return _write_single_run(all_results, run_ts, run_index, out_dir, output_prefix)
 
 
+USAGE = """usage: python evaluation/runner.py [--dry-run] [--runs N] [--output-prefix PREFIX] [--deterministic-routing]
+
+  --dry-run                run TC-08, TC-09 and TC-15 only
+  --runs N                 repeat the suite N times (default 1)
+  --output-prefix PREFIX   prefix for results, reports and session files
+  --deterministic-routing  route every test case to its expected agents
+"""
+
+KNOWN_FLAGS = {"--dry-run", "--runs", "--output-prefix", "--deterministic-routing"}
+
+
 def main() -> None:
     """Run the evaluation suite."""
+    args = sys.argv[1:]
+    unknown = [a for a in args if a.startswith("-") and a not in KNOWN_FLAGS]
+    if unknown or "-h" in args or "--help" in args:
+        print(USAGE)
+        if unknown and "-h" not in args and "--help" not in args:
+            print(f"unknown argument(s): {unknown}")
+            sys.exit(2)
+        return
     dry_run = "--dry-run" in sys.argv
+    global DETERMINISTIC_ROUTING
+    DETERMINISTIC_ROUTING = "--deterministic-routing" in sys.argv
+    if DETERMINISTIC_ROUTING:
+        print("DETERMINISTIC ROUTING: test cases are routed to their expected agents")
 
     # Parse --runs N
     n_runs = 1
