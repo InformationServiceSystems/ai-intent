@@ -162,12 +162,12 @@ _logger_lock = threading.Lock()
 
 
 def get_logger() -> MCPLogger:
-    """Return the singleton MCPLogger instance."""
+    """Return the singleton MCPLogger instance (database path from AI_INTENT_DB, default data/sessions.db)."""
     global _logger_instance
     if _logger_instance is None:
         with _logger_lock:
             if _logger_instance is None:
-                _logger_instance = MCPLogger()
+                _logger_instance = MCPLogger(os.getenv("AI_INTENT_DB", "data/sessions.db"))
     return _logger_instance
 
 

@@ -21,7 +21,10 @@ def default_model() -> str:
     return os.getenv("LLM_MODEL", FALLBACK_MODEL)
 
 
-client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+# The Ollama endpoint can be redirected, e.g. to an SSH tunnel onto an HPC GPU node.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 
 def chat(system: str, user: str, model: str | None = None) -> str:
