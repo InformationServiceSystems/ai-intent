@@ -10,9 +10,10 @@ mount             = /home/wolfgang.maass/.ollama:/root/.ollama
 output            = ollama-aiintent.out
 error             = ollama-aiintent.err
 log               = ollama-aiintent.log
-request_memory    = 64G
+request_memory    = 32G
 request_cpus      = 8
 request_gpus      = 1
-Requirements = (Machine == "tig.hpc.uni-saarland.de" || Machine == "tyr1.hpc.uni-saarland.de" || Machine == "tyr2.hpc.uni-saarland.de" || Machine == "forseti.hpc.uni-saarland.de" || Machine == "fjolnir.hpc.uni-saarland.de" || Machine == "fornjoter.hpc.uni-saarland.de")
-Rank = (Machine == "tig.hpc.uni-saarland.de") * 3 + (Machine == "tyr1.hpc.uni-saarland.de") * 3 + (Machine == "tyr2.hpc.uni-saarland.de") * 3 + (Machine == "forseti.hpc.uni-saarland.de") * 2 + (Machine == "fjolnir.hpc.uni-saarland.de") * 2 + (Machine == "fornjoter.hpc.uni-saarland.de") * 2
+# Any GPU node with Docker will do for an 8B model; prefer the large-memory cards.
+Requirements = (TARGET.GPUs >= 1) && TARGET.HasDocker
+Rank = regexp("H200", GPUs_DeviceName) * 4 + regexp("RTX PRO 6000", GPUs_DeviceName) * 3 + regexp("A100-SXM4-80GB", GPUs_DeviceName) * 3 + regexp("A100", GPUs_DeviceName) * 2 + regexp("V100", GPUs_DeviceName) * 1
 queue
