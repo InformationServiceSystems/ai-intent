@@ -2,7 +2,7 @@
 
 Working title: *Commitments, Dispositions and Traces: An Ontological Account of Accountable Delegation in Multi-Agent AI Systems*
 
-Status: planning started 6 October 2026; complete draft with results of the second campaign on 7 October 2026 (`ai-intent-ufo.tex`, 14 pages LNCS, references from page 13). Awaiting author review before the third campaign. The ER 2026 paper is frozen at tag `er2026-v1.0`; everything here builds on `main`.
+Status: planning started 6 October 2026; complete draft with results of the second campaign on 7 October 2026 (`ai-intent-ufo.tex`, 14 pages LNCS, references from page 13). All three campaigns done (the third with deterministic routing); awaiting author review. The ER 2026 paper is frozen at tag `er2026-v1.0`; everything here builds on `main`.
 
 ## 1. Motivation
 
@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| Third campaign, deterministic routing (10 runs, HPC) | `evaluation/ufo_hpc3_*`, `evaluation/sessions/ufo_hpc3_*` | `paper2/e2-e3-results-run3.md`, `paper2/e2-e3-notes-run3.md` | done 7 Oct 2026, ME 80.0% |
 | First full campaign (10 runs, HPC) | `evaluation/ufo_hpc_p*_results_*.json`, `evaluation/sessions/ufo_hpc_*` | `paper2/e2-e3-results.md`, `paper2/e2-e3-notes.md` | done 7 Oct 2026 |
 | Runner persistence and E2/E3 fields | `evaluation/runner.py`, `evaluation/paper2_analysis.py` | writes `evaluation/sessions/*.json|ttl`, `paper2/e2-e3-results.md` | implemented, dry run passed |
 | Verdict provenance | `agents/compliance.py` | `message_id` now names the evaluated action | implemented |
