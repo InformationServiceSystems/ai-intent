@@ -219,6 +219,8 @@ A second paper, planned under [paper2/PLAN.md](paper2/PLAN.md), uses three parts
 
 Compliance verdicts now carry the log id of the Proposed Action they evaluated, so the provenance of every verdict is explicit in the trace.
 
+Two evaluation campaigns of 19 test cases in 10 runs each (7 October 2026, llama3.1:8b on an HPC GPU node, see `scripts/hpc/`) are archived with every session under `evaluation/sessions/`. In the second campaign all eight invariants hold on 190 of 190 sessions and Boundary Violation Containment is 100% in every run; results and notes are under `paper2/`.
+
 ## Archived reference version (ER 2026)
 
 The state of this repository as submitted with the ER 2026 paper is preserved as an immutable reference, independent of later extensions and follow-up papers:

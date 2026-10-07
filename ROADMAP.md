@@ -80,6 +80,8 @@ ORM addresses this at design time, with three properties the current encoding la
 - **5.2 Dispositions as model constructs (UFO-A/B).** `agents/dispositions.py` adds Disposition (bearer, degree, triggering situation, characteristic rule set) and attributes rejections to dispositions deterministically. Logged as `disposition.manifest.{agent}`.
 - **5.3 Traces as gUFO graphs.** `mcp/gufo_export.py` exports a session as a gUFO-typed RDF graph from the log alone; `evaluation/sparql_checks.py` states eight integrity invariants as SPARQL queries. Run with `python evaluation/sparql_checks.py --all`.
 
+Two full campaigns ran on 7 October 2026 (`evaluation/ufo_hpc*_results_*.json`, notes under `paper2/`). The paper draft is at `paper2/ai-intent-ufo.tex`. Next: a third campaign with deterministic routing for the evaluation (item 4) after the draft is reviewed.
+
 *Depends on* nothing in sections 1 to 4; *relates to* 2.2, which the gUFO export makes concrete.
 
 ## Dependency summary
