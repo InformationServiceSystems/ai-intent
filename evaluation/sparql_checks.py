@@ -141,8 +141,8 @@ CHECKS: list[IntegrityCheck] = [
 ]
 
 
-def run_checks(graph: Graph, checks: list[IntegrityCheck] | None = None) -> list[CheckResult]:
-    """Run every integrity check against a graph and report the violating rows."""
+def run_checks(graph: Graph, checks: list[IntegrityCheck] | None = None, with_gufo: bool = False) -> list[CheckResult]:
+    """Run every integrity check against a graph and report the violating rows; with_gufo adds the reasoner check Q9."""
     results: list[CheckResult] = []
     for check in checks or CHECKS:
         rows = graph.query(PREFIXES + check.query)
@@ -153,6 +153,9 @@ def run_checks(graph: Graph, checks: list[IntegrityCheck] | None = None) -> list
         results.append(CheckResult(
             check_id=check.check_id, claim=check.claim, passed=not violations, violations=violations,
         ))
+    if with_gufo:
+        from evaluation.gufo_consistency import as_check_result, check_gufo_consistency
+        results.append(as_check_result(check_gufo_consistency(graph)))
     return results
 
 
@@ -178,6 +181,7 @@ def main() -> int:
     parser.add_argument("--all", action="store_true", help="check the most recent sessions")
     parser.add_argument("--limit", type=int, default=20, help="number of sessions with --all")
     parser.add_argument("--turtle", metavar="PATH", help="also write the session graph as Turtle")
+    parser.add_argument("--gufo", action="store_true", help="also run the OWL-RL check against the gUFO axioms (Q9)")
     args = parser.parse_args()
 
     logger = get_logger()
@@ -192,7 +196,7 @@ def main() -> int:
     failed = 0
     for sid in sessions:
         graph = export_session_graph(sid, logger)
-        results = run_checks(graph)
+        results = run_checks(graph, with_gufo=args.gufo)
         _print_results(sid, results)
         failed += sum(1 for r in results if not r.passed)
         if args.turtle and len(sessions) == 1:

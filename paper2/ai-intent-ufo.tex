@@ -268,7 +268,7 @@ Second, the export reads nothing but the log. Delegations, dispositions and mani
 Third, gUFO has no class for normative descriptions, so the Mandate is typed as \code{gufo:Object}. The typing is weak and we say so; Section~\ref{sec:corrections} discusses it.
 
 \paragraph{Integrity queries.}
-Eight invariants of the framework are stated as SPARQL queries whose result set must be empty (Table~\ref{tab:checks}). Each row returned is a violation with the individuals involved. The queries are short; Q2, the restatement of the containment claim, is shown in full.
+Eight invariants of the framework are stated as SPARQL queries whose result set must be empty (Table~\ref{tab:checks}). Each row returned is a violation with the individuals involved. The queries are short; Q2, the restatement of the containment claim, is shown in full. A ninth check, Q9, is not a query but a reasoning step: the session graph is merged with the gUFO ontology, closed under OWL~RL, and then scanned for individuals that the closure places in two disjoint UFO categories, such as an endurant that is also an event. Q9 is what makes the grounding of Table~\ref{tab:mapping} falsifiable: a verdict typed as a mode of an event, the reading the earlier paper gave, is caught by it, because the domain of \code{inheresIn} forces the bearer to be an endurant and gUFO declares endurants and events disjoint.
 
 \begin{table}[tb]
 \centering
@@ -286,6 +286,7 @@ Q5 & A Disposition is manifested only in events targeting its bearer, and only w
 Q6 & Every Proposed Action at the analysis checkpoint receives a verdict. \\
 Q7 & The Accountability Trace comprises every Log Entry of the session. \\
 Q8 & Every rule a verdict names against $a$ belongs to the Commitment of $a$. \\
+Q9 & The graph is consistent with the gUFO axioms: after OWL-RL closure no individual falls into two disjoint UFO categories. \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -300,7 +301,7 @@ SELECT ?agent ?block ?final WHERE {
 }
 \end{lstlisting}
 
-Q2 is the claim that gives AI-Intent its name for bounded autonomy, now readable by an auditor who has never seen the Python code. Q3, Q4 and Q8 are the claims of Section~\ref{sec:delegation}; Q5 is the claim of Section~\ref{sec:dispositions}; Q1, Q6 and Q7 are the structural conditions on which the others rest.
+Q2 is the claim that gives AI-Intent its name for bounded autonomy, now readable by an auditor who has never seen the Python code. Q3, Q4 and Q8 are the claims of Section~\ref{sec:delegation}; Q5 is the claim of Section~\ref{sec:dispositions}; Q1, Q6 and Q7 are the structural conditions on which the others rest; Q9 is the condition that the export means what it says in UFO terms.
 
 %=====================================================================
 \section{Reference Implementation and Evaluation}
@@ -335,6 +336,7 @@ Q5 manifestation has bearer & 190/190 \\
 Q6 every action evaluated & 190/190 \\
 Q7 trace complete & 190/190 \\
 Q8 rule in commitment & 190/190 \\
+Q9 gUFO consistent & \todo{Q9} \\
 \bottomrule
 \end{tabular}
 \end{minipage}\hfill

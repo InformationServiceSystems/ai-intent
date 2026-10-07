@@ -216,6 +216,7 @@ A second paper, planned under [paper2/PLAN.md](paper2/PLAN.md), uses three parts
   python evaluation/sparql_checks.py <session_id> --turtle session.ttl
   python evaluation/sparql_checks.py --all --limit 20
   ```
+- **Reasoner check against gUFO (Q9).** `evaluation/gufo_consistency.py` merges a session graph with the gUFO ontology (`evaluation/ontology/gufo.ttl`, CC BY 4.0), closes it under OWL RL with `owlrl`, and reports every individual placed in two disjoint UFO categories. The runner applies it to every session; `sparql_checks.py --gufo` adds it on demand.
 - **Deterministic routing for the evaluation.** `python evaluation/runner.py --deterministic-routing` routes every test case to its expected agents instead of letting the model decide, so Mandate Enforcement is measured on every out-of-scope case. The override is logged as `intent.route` with `routing_mode: override` and still passes the routing checkpoint.
 
 Compliance verdicts now carry the log id of the Proposed Action they evaluated, so the provenance of every verdict is explicit in the trace.

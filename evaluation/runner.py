@@ -39,7 +39,7 @@ def persist_session(tc_id: str, session_id: str, messages: list, result: Any, pr
         }, f, indent=1, default=str)
     graph = export_session_graph(session_id)
     (SESSIONS_DIR / f"{stem}.ttl").write_text(graph.serialize(format="turtle"))
-    checks = run_checks(graph)
+    checks = run_checks(graph, with_gufo=True)
     return {
         "triples": len(graph),
         "all_passed": all(c.passed for c in checks),
