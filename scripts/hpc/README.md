@@ -8,10 +8,10 @@ The suite itself runs on the workstation; only the language model runs on the cl
    condor_submit ollama-aiintent.sub
    condor_q -nobatch -af:h ClusterId JobStatus RemoteHost     # wait for JobStatus 2 and a RemoteHost
    ```
-2. **Pull the model once** the server is up (models persist in `~/.ollama`):
+2. **Pull the model** once the server answers (the model store lives in the container's `/tmp`, so this is repeated per job and takes a few minutes):
    ```bash
    NODE=$(condor_q -af RemoteHost | sed 's/.*@//')
-   OLLAMA_HOST=$NODE:11434 ~/bin/ollama pull llama3.1:8b
+   curl -X POST http://$NODE:11434/api/pull -d '{"name":"llama3.1:8b","stream":false}'
    ```
 3. **Open the tunnel** from the workstation (local port 11435, so a local Ollama on 11434 is untouched):
    ```bash
@@ -28,4 +28,4 @@ The suite itself runs on the workstation; only the language model runs on the cl
 
 The cluster accepts docker or container universe jobs only. If `condor_submit` fails with `SECMAN` errors, the scheduler is refusing connections; check `/var/log/condor/MasterLog` on that login node for the reason (a full spool disk shows as `errno = 28`) and submit on the other login node.
 
-HTCondor 24.12 ignores the `mount =` line (it warns that the line is unused), so the model is pulled into the container's own storage and must be pulled again for each new job. That costs a few minutes per job and is acceptable for this workload.
+Three things that did not work on 7 October 2026, so the submit file avoids them: the container universe accepts only local `.sif` images (`apptainer pull` builds one, but the docker universe was quicker); the docker universe's default bridge network makes port 11434 unreachable from the login node, hence `docker_network_type = host`; and the container cannot write to the NFS home while HTCondor forces `HOME` there, hence the overridden entrypoint that sets `HOME=/tmp`. The `mount =` keyword is ignored by HTCondor 24.12. Current Ollama builds drop V100 and P100 cards, so the requirements exclude them.

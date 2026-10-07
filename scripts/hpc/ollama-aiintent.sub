@@ -1,19 +1,29 @@
 # Ollama server for the AI-Intent evaluation suite on the UdS HPC cluster
-# (HTCondor, docker universe). One top-tier GPU node, ten parallel request
-# slots so ten runner processes can drive it through an SSH tunnel.
-# Submit on the login node:  condor_submit ollama-aiintent.sub
+# (HTCondor). One GPU node, ten parallel request slots so ten runner
+# processes can drive it through an SSH tunnel.
+#
+# Docker universe with host networking, so the node's port 11434 is reachable
+# from the login node. The container runs as the submitting user, the NFS home
+# is not visible inside it and HTCondor forces HOME to that home, so the
+# entrypoint is overridden with a shell that re-points HOME at /tmp before
+# starting the server. Models are therefore pulled again for each job.
+# Submit on a login node with a working scheduler:  condor_submit ollama-aiintent.sub
 universe          = docker
 docker_image      = ollama/ollama:latest
-arguments         = serve
+docker_network_type = host
+docker_override_entrypoint = true
+executable        = /bin/sh
+arguments         = "-c 'export HOME=/tmp OLLAMA_MODELS=/tmp/ollama-models; exec ollama serve'"
 environment       = "OLLAMA_HOST=0.0.0.0:11434 OLLAMA_KEEP_ALIVE=24h OLLAMA_NUM_PARALLEL=10 OLLAMA_MAX_LOADED_MODELS=1"
-mount             = /home/wolfgang.maass/.ollama:/root/.ollama
 output            = ollama-aiintent.out
 error             = ollama-aiintent.err
 log               = ollama-aiintent.log
 request_memory    = 32G
 request_cpus      = 8
 request_gpus      = 1
-# Any GPU node with Docker will do for an 8B model; prefer the large-memory cards.
-Requirements = (TARGET.GPUs >= 1) && TARGET.HasDocker
-Rank = regexp("H200", GPUs_DeviceName) * 4 + regexp("RTX PRO 6000", GPUs_DeviceName) * 3 + regexp("A100-SXM4-80GB", GPUs_DeviceName) * 3 + regexp("A100", GPUs_DeviceName) * 2 + regexp("V100", GPUs_DeviceName) * 1
+request_disk      = 25G
+# Any GPU node will do for an 8B model, except V100/P100 (compute capability
+# below 7.5, dropped by current Ollama builds). Prefer large-memory cards.
+Requirements = (TARGET.GPUs >= 1) && !regexp("V100|P100", GPUs_DeviceName)
+Rank = regexp("H200", GPUs_DeviceName) * 4 + regexp("RTX PRO 6000", GPUs_DeviceName) * 3 + regexp("A100-SXM4-80GB", GPUs_DeviceName) * 3 + regexp("A100", GPUs_DeviceName) * 2
 queue
