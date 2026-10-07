@@ -125,10 +125,10 @@ A \emph{Disposition} is a tuple $\delta = \langle k, a, g, S_k, R_k\rangle$ with
 
 \begin{definition}[Manifestation]
 \label{def:manifestation}
-Let $e$ be a compliance rejection or block event in session $s$ that targets agent $a$ and names violated rules $V_e$. $e$ is a \emph{manifestation} of $\delta = \langle k, a, g, S_k, R_k\rangle$ if $g \ge \theta$ and $V_e \cap R_k \neq \emptyset$. The attributed rules of the manifestation are $V_e \cap R_k$.
+Let $e$ be a compliance rejection or block event in session $s$ that targets agent $a$ and names violated rules $V_e$. $e$ is a \emph{manifestation} of $\delta = \langle k, a, g, S_k, R_k\rangle$ if $g > \theta$ and $V_e \cap R_k \neq \emptyset$. The attributed rules of the manifestation are $V_e \cap R_k$.
 \end{definition}
 
-The threshold $\theta$ is $0.5$ in the implementation; the neutral preset's degrees of $0.1$ lie below it, so under the neutral preset no rejection is ever attributed to a disposition. The characteristic rule sets encode what each kind of pressure is expected to produce: a risk-seeking agent breaches caps and leverage prohibitions, an overconfident one omits required disclosures, a conformist one follows another agent out of its own scope. Table~\ref{tab:kinds} lists the sets. \todo{table from MANIFESTATION\_MAP with one-line justification per kind}
+The threshold $\theta$ is $0.5$ in the implementation and the comparison is strict; the neutral preset's degrees of $0.1$, and its conformist degree of exactly $0.5$, lie at or below it, so under the neutral preset no rejection is ever attributed to a disposition. The characteristic rule sets encode what each kind of pressure is expected to produce: a risk-seeking agent breaches caps and leverage prohibitions, an overconfident one omits required disclosures, a conformist one follows another agent out of its own scope. Table~\ref{tab:kinds} lists the sets. \todo{table from MANIFESTATION\_MAP with one-line justification per kind}
 
 Attribution is deterministic and reads only the log: after the sub-agent calls complete, the orchestrator scans the session's rejection and block events, applies Definition~\ref{def:manifestation} for every Disposition the agent bears, and records the result as \code{disposition.manifest.\{a\}}. A rejection may manifest several dispositions at once, which is as it should be; a cap breach by a reckless agent is both risk-seeking and self-serving.
 

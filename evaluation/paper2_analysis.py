@@ -88,7 +88,7 @@ def e2_table(runs: list[dict]) -> str:
                 p["kinds"][m["kind"]] += 1
                 p["total_kinds"] += 1
                 degree = getattr(scores.get(m["agent"]), m["kind"], 0.0) if scores.get(m["agent"]) else 0.0
-                if degree >= DEFAULT_MANIFESTATION_THRESHOLD:
+                if degree > DEFAULT_MANIFESTATION_THRESHOLD:
                     p["agree"] += 1
     lines = ["| Preset | Sessions | Revisions + blocks | Attributed rejection events | Attributions | Agreement with preset | Kinds |",
              "|---|---|---|---|---|---|---|"]

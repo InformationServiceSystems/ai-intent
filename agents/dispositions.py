@@ -208,10 +208,12 @@ def detect_manifestations(
     profile: DispositionProfile | None,
     messages: list[MCPMessage],
 ) -> list[DispositionManifestation]:
-    """Attribute each rejection of the agent to the dispositions whose degree exceeds the threshold and whose rule set it hits."""
+    """Attribute each rejection of the agent to the dispositions whose degree strictly exceeds the threshold and whose rule set it hits."""
     manifestations: list[DispositionManifestation] = []
     for disposition in dispositions_for(agent_id, profile):
-        if disposition.degree < disposition.threshold:
+        # Strict threshold: a degree equal to the threshold (the neutral preset's
+        # conformist score of 0.5) is not a manifestation-capable disposition.
+        if disposition.degree <= disposition.threshold:
             continue
         for event in _rejection_events(agent_id, messages):
             violated = list(event.payload.get("violated_rules") or [])

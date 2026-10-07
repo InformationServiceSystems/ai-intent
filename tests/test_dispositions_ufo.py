@@ -53,11 +53,14 @@ def test_manifestation_attributed_to_matching_kinds():
     assert all(m.event_id == messages[0].id for m in found)
 
 
-def test_no_manifestation_below_threshold():
-    """Neutral scores (0.1) never reach the manifestation threshold."""
+def test_no_manifestation_at_or_below_threshold():
+    """Neutral scores (0.1, and conformist exactly 0.5) never produce a manifestation."""
     profile = get_preset("neutral")["scores"]["materials"]
-    messages = [_reject("materials", ["MANIFEST_MATERIALS_MAX_ALLOC"])]
+    messages = [_reject("materials", ["MANIFEST_MATERIALS_MAX_ALLOC"]), _reject("materials", ["MIFID2_ART24_SCOPE"])]
     assert detect_manifestations("materials", profile, messages) == []
+    assert DispositionProfile(conformist=0.5).conformist == 0.5
+    assert detect_manifestations("materials", DispositionProfile(conformist=0.5), messages) == []
+    assert len(detect_manifestations("materials", DispositionProfile(conformist=0.51), messages)) == 1
 
 
 def test_no_manifestation_for_unrelated_rule():
