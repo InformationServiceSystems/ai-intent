@@ -380,6 +380,8 @@ async def _route_with_compliance(
         try:
             raw_routing = chat(routing_prompt, query)
             routing = safe_parse_json(raw_routing)
+            if not isinstance(routing, dict):
+                raise ValueError("routing output is not a JSON object")
         except Exception as e:
             routing = {"routing_rationale": f"Routing error: {e}", "agents_to_call": ["stocks", "bonds", "materials"]}
 

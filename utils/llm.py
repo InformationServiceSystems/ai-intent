@@ -72,6 +72,16 @@ def _sanitize_json_string(text: str) -> str:
 
 
 def safe_parse_json(text: str) -> dict:
+    """Parse JSON from LLM output into a dict, unwrapping a JSON-encoded string once and rejecting non-objects."""
+    obj = _parse_json_value(text)
+    if isinstance(obj, str):
+        obj = _parse_json_value(obj)
+    if not isinstance(obj, dict):
+        raise ValueError(f"LLM output is not a JSON object (got {type(obj).__name__})")
+    return obj
+
+
+def _parse_json_value(text: str):
     """Parse JSON from LLM output, handling markdown fences, control chars, and extra text."""
     text = text.strip()
     text = re.sub(r"^```json\s*", "", text)

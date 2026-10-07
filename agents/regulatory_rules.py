@@ -39,8 +39,8 @@ MIFID2_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MIFID2_ART24_SCOPE",
-        description="Out-of-scope asset class recommendations must be blocked entirely — an agent recommending assets outside its mandate is a regulatory violation.",
-        applies_to=["stocks", "bonds", "materials"],
+        description="Out-of-scope asset class recommendations must be blocked entirely — an agent recommending assets outside its mandate is a regulatory violation. The orchestrator breaches it by routing to an agent outside the approved set.",
+        applies_to=["stocks", "bonds", "materials", "central"],
         check_type="both",
         severity="block",
         regulatory_basis="MiFID II Art. 24 — Fair, Clear and Not Misleading",
