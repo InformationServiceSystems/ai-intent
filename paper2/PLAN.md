@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| Runner persistence and E2/E3 fields | `evaluation/runner.py`, `evaluation/paper2_analysis.py` | writes `evaluation/sessions/*.json|ttl`, `paper2/e2-e3-results.md` | implemented, dry run passed |
 | Verdict provenance | `agents/compliance.py` | `message_id` now names the evaluated action | implemented |
 
 The export reads nothing but the MCP log, in keeping with the invariant that the log is the source of truth. Delegation chains, dispositions and manifestations therefore appear in the graph only if the orchestrator logged them, which is itself an auditable fact.
@@ -43,7 +44,7 @@ The export reads nothing but the MCP log, in keeping with the invariant that the
 
 - **E1, containment at design time.** Mutate each numeric sub-mandate parameter above its parent bound and show that `check_chain_containment` reports it before any session runs. Deterministic; no LLM.
 - **E2, attribution agreement.** Re-run TC-16 to TC-19 (four presets, ten runs) with the hooks active. For each rejection, compare the attributed disposition kinds with the preset in force. Report precision (attributed kinds whose degree in the preset is at or above threshold) and the share of rejections left unattributed. Under the neutral preset the expected attribution rate is zero.
-- **E3, invariants over the archive.** Export every session of the ER 2026 evaluation and run the eight checks. Sessions predate the hooks, so Q3, Q4 and Q5 will report absences; those are findings about trace completeness, not failures of the gate. Report per-check pass rates on archived sessions and on new sessions.
+- **E3, invariants over fresh sessions.** The MCP logs of the 190 ER 2026 sessions were not preserved: the result files hold scores and session ids only, and the database no longer contains those sessions (see `e3-archive-checks.md` for the 21 sessions that remain). The runner therefore now persists every session's log and gUFO graph under `evaluation/sessions/` and runs the eight checks per session; E3 reports per-check pass rates over the regenerated suite (19 cases, several runs). The 21 remaining archived sessions serve as the before-hooks comparison.
 - **E4, cost.** Graph size and query time per session, to show the export is practical.
 
 ## 6. Paper structure

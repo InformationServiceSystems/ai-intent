@@ -15,6 +15,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.orchestrator import run as orchestrator_run, OrchestrationResult
 from mcp.logger import get_logger
+from mcp.gufo_export import export_session_graph
+from evaluation.sparql_checks import run_checks
+
+SESSIONS_DIR = Path(__file__).parent / "sessions"
+
+
+def persist_session(tc_id: str, session_id: str, messages: list, result: Any, prefix: str = "") -> dict[str, Any]:
+    """Write the session's MCP log and gUFO graph to evaluation/sessions and return its integrity-check summary."""
+    SESSIONS_DIR.mkdir(exist_ok=True)
+    stem = f"{prefix}{tc_id}_{session_id[:8]}"
+    with open(SESSIONS_DIR / f"{stem}.json", "w") as f:
+        json.dump({
+            "tc_id": tc_id,
+            "session_id": session_id,
+            "orchestration_result": result.model_dump(),
+            "mcp_log": [m.model_dump() for m in messages],
+        }, f, indent=1, default=str)
+    graph = export_session_graph(session_id)
+    (SESSIONS_DIR / f"{stem}.ttl").write_text(graph.serialize(format="turtle"))
+    checks = run_checks(graph)
+    return {
+        "triples": len(graph),
+        "all_passed": all(c.passed for c in checks),
+        "failed": [c.check_id for c in checks if not c.passed],
+        "violations": {c.check_id: c.violations[:5] for c in checks if not c.passed},
+    }
+
 
 # ---------------------------------------------------------------------------
 # Test case definitions
@@ -443,7 +470,7 @@ def score_dc(result: OrchestrationResult) -> int:
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_test_case(tc: dict) -> dict[str, Any]:
+def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
     """Run a single test case and return scored result."""
     session_id = str(uuid4())
     tc_id = tc["tc_id"]
@@ -491,6 +518,13 @@ def run_test_case(tc: dict) -> dict[str, Any]:
     logger = get_logger()
     messages = logger.get_session(session_id)
 
+    # Persist the full log and gUFO graph so the trace survives database resets,
+    # and run the SPARQL integrity checks (E3) on the fresh session.
+    try:
+        integrity = persist_session(tc_id, session_id, messages, result, output_prefix)
+    except Exception as e:  # persistence must never fail a test case
+        integrity = {"error": str(e)}
+
     # Score each applicable dimension
     scores: dict[str, int | None] = {}
     cda_notes: dict = {}
@@ -529,7 +563,8 @@ def run_test_case(tc: dict) -> dict[str, Any]:
     print(f"  {tc_id}: {total}/{max_possible} | "
           f"blocks={len(result.forced_blocks)}/{tc['forced_blocks_expected']} | "
           f"msgs={len(messages)} | {elapsed:.1f}s | "
-          f"{'PASS' if tc_pass else 'FAIL'}")
+          f"{'PASS' if tc_pass else 'FAIL'} | "
+          f"integrity={'ok' if integrity.get('all_passed') else integrity.get('failed', integrity)}")
 
     return {
         "tc_id": tc_id,
@@ -549,6 +584,16 @@ def run_test_case(tc: dict) -> dict[str, Any]:
         "notes": "; ".join(notes_parts) if notes_parts else "",
         "cda_notes": {k: str(v) if not isinstance(v, (str, list, dict, bool)) else v for k, v in cda_notes.items()} if cda_notes else {},
         "duration_s": round(elapsed, 1),
+        "integrity": integrity,
+        "manifestations": [
+            {"agent": m["agent_id"], "kind": m["kind"], "rules": m["rule_ids"], "revision": m["revision_count"]}
+            for m in result.disposition_manifestations
+        ],
+        "commitment_breaches": [
+            {"agent": b.get("agent"), "answerable_to": b.get("answerable_to"), "rules": b.get("violated_rules")}
+            for b in result.commitment_breaches
+        ],
+        "containment_all_ok": all(c["contained"] for c in result.containment_checks),
     }
 
 
@@ -944,7 +989,7 @@ def run_single_suite(cases: list[dict], run_index: int, out_dir: Path, output_pr
         if i > 0:
             print("  (sleeping 10s between test cases...)")
             time.sleep(10)
-        result = run_test_case(tc)
+        result = run_test_case(tc, output_prefix)
         all_results.append(result)
 
     return _write_single_run(all_results, run_ts, run_index, out_dir, output_prefix)
