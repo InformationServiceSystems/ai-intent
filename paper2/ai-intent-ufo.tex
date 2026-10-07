@@ -331,13 +331,74 @@ The constructs of Sections~\ref{sec:delegation} to~\ref{sec:traces} are implemen
 Four evaluations address the three research questions. \emph{E1} mutates every bounded sub-mandate parameter to the parent's bound and to 50, 100 and 150 percent above it, and checks that containment reports exactly the mutations above the bound. \emph{E2} runs the four disposition test cases of the earlier protocol (neutral, aggressive broker, reckless portfolio manager, groupthink) and compares the kinds attributed to each rejection with the preset in force; the attribution is correct if the preset gives the agent a degree above the threshold for the attributed kind. \emph{E3} runs the full protocol of 19 test cases ten times, exports every session, and runs the eight queries on each. \emph{E4} records graph size and query time per session. The campaign ran on one A100 node of a university cluster with ten runner processes in parallel; the 190 sessions took about fifty minutes.
 
 \paragraph{Results.}
-\todo{E1: 10 mutations, 0 misjudged (paper2/e1-containment.md). E2, E3, E4 tables from the second campaign (prefix ufo\_hpc2) once it completes; first campaign (ufo\_hpc) as the source of the two Q8 findings.}
+\emph{E1.} All ten mutations were judged correctly: the two values at the parent bound were reported as contained, the six above it as not contained. The check is trivial by construction, which is the point; containment is a property one can establish before a single message is sent.
+
+\emph{E3.} Table~\ref{tab:results} gives the integrity checks and the six dimensions of the earlier protocol over the 190 sessions of the campaign. Every invariant holds on every session. Boundary Violation Containment and Compliance Gate Precision are at 100 percent in all ten runs; no session contains a forced pass, and no execution failed. The model-bound dimensions are where the earlier campaign left them, which is expected: the constructs added here change what the trace says, not how well the model follows instructions. Mandate Enforcement varies between 0 and 100 percent across runs because whether an out-of-scope request reaches the agent that should decline it depends on a routing decision the model makes non-deterministically.
+
+\begin{table}[t]
+\centering
+\caption{Campaign of 19 test cases in 10 runs (190 sessions). Left: integrity checks, sessions on which the query returned no row. Right: the six dimensions of the ER 2026 protocol, mean and standard deviation of the per-run percentage of achievable points.}
+\label{tab:results}
+\begin{minipage}[t]{0.46\textwidth}
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Check} & \textbf{Pass} \\
+\midrule
+Q1 one action per verdict & 190/190 \\
+Q2 no delivery after block & 190/190 \\
+Q3 blocked agent committed & 190/190 \\
+Q4 breach reaches Principal & 190/190 \\
+Q5 manifestation has bearer & 190/190 \\
+Q6 every action evaluated & 190/190 \\
+Q7 trace complete & 190/190 \\
+Q8 rule in commitment & 190/190 \\
+\bottomrule
+\end{tabular}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.50\textwidth}
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Dim.} & \textbf{Thr.} & \textbf{Mean} & \textbf{Std} \\
+\midrule
+BVC & 100\% & 100.0\% & 0.0 \\
+CGP & 85\% & 100.0\% & 0.0 \\
+ATC & 80\% & 74.2\% & 4.2 \\
+CDA & 90\% & 40.9\% & 6.4 \\
+ME & 75\% & 43.3\% & 27.5 \\
+DC & none & 47.5\% & 14.2 \\
+\bottomrule
+\end{tabular}
+\par\smallskip\footnotesize ER 2026 means for comparison: BVC 97.9, CGP 97.9, ATC 71.3, CDA 38.6, ME 35.0, DC 57.5.
+\end{minipage}
+\end{table}
+
+\emph{E2.} Table~\ref{tab:e2} reports attribution for the four disposition presets. Under the neutral preset no rejection was attributed to any disposition, as the strict threshold intends. Under the aggressive and the reckless presets, attributions are dominated by the risk-seeking and overconfident kinds, with self-serving third; under groupthink only conformist attributions occur. Every attribution agrees with the preset in force. A rejection may manifest several dispositions, so attributions exceed attributed events.
+
+\begin{table}[t]
+\centering
+\caption{E2: manifestation attribution over the four disposition test cases, ten runs each.}
+\label{tab:e2}
+\begin{tabular}{@{}lrrrl@{}}
+\toprule
+\textbf{Preset} & \textbf{Rev.+blocks} & \textbf{Events attributed} & \textbf{Attributions} & \textbf{Kinds} \\
+\midrule
+neutral & 14 & 0 & 0 & none \\
+aggressive broker & 48 & 49 & 66 & risk-seeking 37, self-serving 15, overconfident 14 \\
+reckless portfolio & 81 & 51 & 77 & risk-seeking 32, overconfident 28, self-serving 17 \\
+groupthink & 57 & 2 & 2 & conformist 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{E4.} A session graph has 514 to 2569 triples, 869 on average. Parsing a graph takes 14 ms and running all eight queries 69 ms on average on a laptop, 173 ms at most. Export and verification are therefore practical at the granularity of a session, and well within what an audit of a day's sessions would need.
 
 \paragraph{What the invariants found.}
 Q8 states that a rule a verdict names against an agent must belong to that agent's Commitment. It failed twice, and both failures were specification gaps rather than gate failures. Before the campaign, a live session under the reckless preset produced verdicts naming five disposition-integrity rules that the Compliance Agent implemented but the registry did not contain, so no Commitment covered them. During the campaign, one routing block named the out-of-scope rule against the orchestrator although the registry listed the rule for the three specialists only. In both cases the gate enforced a rule that no agent had committed to. The earlier evaluation could not see this: its scorer looked up rule identifiers in verdicts, not in commitments. Both gaps were closed by registering the rules, which is the correct repair, since the rules were right and the registry was incomplete.
 
 \paragraph{Threats to validity.}
-The characteristic rule sets of Table~\ref{tab:kinds} are a modelling decision; a different partition would attribute differently, and E2 can only show that attribution agrees with the preset, not that the partition is the right one. The regenerated sessions are not the sessions of the earlier campaign, whose logs were not preserved; the comparison in Table~\ref{tab:dims} \todo{add table} is between campaigns under the same protocol and model, not between the same sessions. All results are for one small model; a more capable model would produce fewer rejections and therefore fewer manifestations, which would make E2 less informative but would not affect E1, E3 or E4.
+The characteristic rule sets of Table~\ref{tab:kinds} are a modelling decision; a different partition would attribute differently, and E2 can only show that attribution agrees with the preset, not that the partition is the right one. The regenerated sessions are not the sessions of the earlier campaign, whose logs were not preserved; the comparison in Table~\ref{tab:results} is between campaigns under the same protocol and model, not between the same sessions. All results are for one small model; a more capable model would produce fewer rejections and therefore fewer manifestations, which would make E2 less informative but would not affect E1, E3 or E4.
 
 %=====================================================================
 \section{Related Work}
