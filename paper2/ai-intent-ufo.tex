@@ -13,6 +13,8 @@
 \usepackage{hyperref}
 \usepackage{tabularx}
 \usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, calc}
 
 \lstset{basicstyle=\ttfamily\footnotesize, breaklines=true, frame=single, aboveskip=6pt, belowskip=6pt}
 \newcommand{\uml}[1]{\guillemotleft #1\guillemotright}
@@ -118,8 +120,64 @@ The rule identifiers that operationalise $C$ are the rules of the registry that 
 
 The commitment carries the Mandate's content, the claim carries the entitlement to enforcement. Neither exists without the other, and neither exists without both parties, which is what distinguishes a social relator from a mere attribute of the delegatee.
 
+\begin{figure}[t]
+\centering
+\tikzset{
+  font=\small,
+  obj/.style={draw, rounded corners=2pt, minimum width=2.3cm, minimum height=0.6cm, fill=white},
+  mode/.style={draw, dashed, rounded corners=2pt, minimum width=2.3cm, minimum height=0.55cm, fill=gray!8},
+  rel/.style={draw, diamond, aspect=2.4, minimum width=2.3cm, fill=gray!15, inner sep=1pt},
+  ev/.style={draw, minimum width=2.3cm, minimum height=0.55cm, fill=white},
+  sit/.style={draw, rounded corners=7pt, minimum width=2.3cm, minimum height=0.55cm, fill=gray!8},
+  dep/.style={-{Stealth[length=5pt]}, thick},
+  lbl/.style={fill=white, inner sep=1.5pt, font=\footnotesize}
+}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}
+\node[obj] (p) at (0,0) {Principal};
+\node[rel] (d1) at (3.5,0) {Delegation};
+\node[obj] (c) at (7,0) {Orchestrator};
+\node[rel] (d2) at (10.5,0) {Delegation};
+\node[obj] (a) at (14,0) {Specialist $a$};
+\draw[thick] (p) -- node[above, lbl] {mediates} (d1) -- node[above, lbl] {mediates} (c);
+\draw[thick] (c) -- node[above, lbl] {mediates} (d2) -- node[above, lbl] {mediates} (a);
+\node[mode] (clm) at (7,-1.9) {Claim $K$};
+\node[mode] (com) at (14,-1.9) {Commitment $C$};
+\draw[dep] (clm) -- node[right, lbl] {inheres in} (c);
+\draw[dep] (com) -- node[right, lbl] {inheres in} (a);
+\draw[dep] (com) -- node[above, lbl] {externally depends on} (clm);
+\draw[dep, dotted] (com.north west) -- node[above, lbl, pos=0.55] {constitutes} (d2.south);
+\node[obj] (m) at (14,-3.8) {Mandate $M_a$};
+\node[sit] (b) at (7,-3.8) {Commitment Breach};
+\draw[dep] (com) -- node[right, lbl] {content} (m);
+\draw[dep] (b) -- node[left, lbl] {answerable to the holder of} (clm);
+\draw[dep] (b.north east) -- node[below, lbl, pos=0.6] {breaches} (com.south west);
+\node[font=\footnotesize] at (0,-3.8) {(a) delegation};
+\end{tikzpicture}}
+
+\medskip
+\resizebox{0.78\textwidth}{!}{%
+\begin{tikzpicture}
+\node[obj]  (a)    at (0,0) {Specialist $a$};
+\node[mode] (disp) at (0,-1.7) {Disposition $\delta$};
+\node[ev]   (rej)  at (4,-1.7) {Rejection event $e$};
+\node[mode] (v)    at (8,-1.7) {Verdict};
+\node[ev]   (act)  at (8,-3.4) {Proposed Action};
+\node[sit]  (b)    at (4,-3.4) {Commitment Breach};
+\draw[dep] (disp) -- node[right, lbl] {inheres in} (a);
+\draw[dep] (disp) -- node[above, lbl] {manifested in} (rej);
+\draw[dep] (v) -- node[above, lbl] {issued by} (rej);
+\draw[dep] (v.north) to[bend right=22] node[above, lbl] {inheres in} (a.north east);
+\draw[dep] (v) -- node[right, lbl] {historically depends on} (act);
+\draw[dep] (rej) -- node[right, lbl] {brings about, on a block} (b);
+\node[font=\footnotesize] at (-0.2,-3.4) {(b) disposition};
+\end{tikzpicture}}
+\caption{(a) The UFO-C reading of delegation: each Delegation is a relator constituted by the Commitment of the delegatee and the Claim of the delegator; a forced block brings about a Commitment Breach answerable to the Claim holder and, through the first Delegation, to the Principal. (b) The disposition account: a Disposition of the specialist is manifested in a rejection event whose Verdict inheres in the specialist and historically depends on the evaluated Proposed Action. Solid boxes are objects, dashed boxes modes, diamonds relators, plain rectangles events, rounded boxes situations.}
+\label{fig:model}
+\end{figure}
+
 \paragraph{The chain.}
-In the reference implementation the Principal delegates to the orchestrator (\code{central}) and the orchestrator delegates to the three specialists. Each sub-delegation records its parent, so the chain is a tree rooted at the Principal:
+In the reference implementation the Principal delegates to the orchestrator (\code{central}) and the orchestrator delegates to the three specialists (Figure~\ref{fig:model}). Each sub-delegation records its parent, so the chain is a tree rooted at the Principal:
 \[
 D(\mathit{principal}, \mathit{central}, M_c)\ \succ\ D(\mathit{central}, a, M_a)\quad\text{for } a \in \{\mathit{stocks}, \mathit{bonds}, \mathit{materials}\}.
 \]
