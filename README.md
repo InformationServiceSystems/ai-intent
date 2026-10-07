@@ -205,6 +205,20 @@ The sidebar provides preset behavioral profiles to test compliance enforcement:
 
 Planned development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md): a fourth predicate template for state-dependent constraints (which makes the rebalancing trigger checkable), structured agent outputs, Object-Role Modeling for Mandate content with verbalized constraints and deontic modality, design-time consistency checks over the OntoUML model, and the empirical follow-ups.
 
+## Follow-up work: UFO as model content (in progress)
+
+A second paper, planned under [paper2/PLAN.md](paper2/PLAN.md), uses three parts of the Unified Foundational Ontology substantively rather than for categorisation only. The code for all three is on `main` and covered by `tests/`:
+
+- **Delegation as commitment and claim (UFO-C).** `agents/delegation.py` builds the chain Principal to orchestrator to sub-agents as relators constituted by a Commitment and a Claim, checks that every sub-mandate is contained in its parent, and resolves a forced block to the parties answerable for it. The orchestrator logs `delegation.establish` at session start and `delegation.breach.{agent}` on every forced block.
+- **Dispositions as model constructs (UFO-A/B).** `agents/dispositions.py` adds a Disposition with bearer, degree, triggering situation and characteristic rule set. Each compliance rejection is attributed to the dispositions it manifests and logged as `disposition.manifest.{agent}`.
+- **Traces as gUFO graphs.** `mcp/gufo_export.py` exports a session from the MCP log alone as a gUFO-typed RDF graph. `evaluation/sparql_checks.py` states eight trace invariants as SPARQL queries:
+  ```bash
+  python evaluation/sparql_checks.py <session_id> --turtle session.ttl
+  python evaluation/sparql_checks.py --all --limit 20
+  ```
+
+Compliance verdicts now carry the log id of the Proposed Action they evaluated, so the provenance of every verdict is explicit in the trace.
+
 ## Archived reference version (ER 2026)
 
 The state of this repository as submitted with the ER 2026 paper is preserved as an immutable reference, independent of later extensions and follow-up papers:

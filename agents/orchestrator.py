@@ -10,6 +10,8 @@ from agents.compliance import (
     ComplianceVerdict,
     get_compliance_agent,
 )
+from agents.delegation import accountability_record, build_delegation_chain, check_chain_containment
+from agents.dispositions import detect_manifestations
 from agents.manifests import (
     CENTRAL_MANIFEST,
     DispositionProfile,
@@ -75,6 +77,12 @@ class OrchestrationResult(BaseModel):
     forced_blocks: list[str]           # replaces forced_passes
     dispositions_used: dict[str, dict[str, float]]
     escalations: list[dict[str, Any]] = []   # uncertainty-policy escalations (populated in #2)
+    # UFO-C delegation chain and containment checks established at session start
+    delegation_chain: list[dict[str, Any]] = []
+    containment_checks: list[dict[str, Any]] = []
+    # Commitment breaches (one per forced block) and disposition manifestations (per rejection)
+    commitment_breaches: list[dict[str, Any]] = []
+    disposition_manifestations: list[dict[str, Any]] = []
 
 
 async def run(
@@ -125,6 +133,23 @@ async def run(
     logger.log(build_message(
         session_id, "internal", "central", "central",
         "disposition.active", disp_payload,
+    ))
+
+    # Establish the delegation chain (UFO-C): Principal -> central -> sub-agents.
+    # Commitments and claims are logged before any sub-agent is called, and the
+    # containment of every sub-mandate in its parent is checked at this point.
+    delegation_chain = build_delegation_chain(principal_id)
+    containment_checks = check_chain_containment(delegation_chain)
+    all_contained = all(c.contained for c in containment_checks)
+    logger.log(build_message(
+        session_id, "internal", "central", "central", "delegation.establish",
+        {
+            "principal_id": principal_id,
+            "chain": [d.model_dump() for d in delegation_chain],
+            "containment_checks": [c.model_dump() for c in containment_checks],
+            "all_contained": all_contained,
+        },
+        "ok" if all_contained else "constraint_violation",
     ))
 
     # Step A — Log user query
@@ -190,6 +215,34 @@ async def run(
                 all_constraints.extend(flags)
                 if result.get("out_of_scope"):
                     all_violations.append(f"{agent_id}: {result.get('analysis', 'out of scope')}")
+
+    # Commitment breaches (UFO-C): every forced block is a breach of the agent's
+    # commitment, answerable along the delegation chain up to the Principal.
+    commitment_breaches: list[dict[str, Any]] = []
+    for agent_id in forced_blocks:
+        last = [v for v in all_verdicts if v.target_agent == agent_id and v.checkpoint == "analysis"]
+        violated = last[-1].violated_rules if last else []
+        record = accountability_record(agent_id, delegation_chain, violated)
+        commitment_breaches.append(record)
+        logger.log(build_message(
+            session_id, "internal", "central", "central",
+            f"delegation.breach.{agent_id}", record, "forced_block",
+        ))
+
+    # Disposition manifestations (UFO-B): attribute each logged rejection of an
+    # agent to the dispositions it bears, reading the log rather than memory.
+    disposition_manifestations: list[dict[str, Any]] = []
+    session_messages = logger.get_session(session_id)
+    for agent_id in agent_ids:
+        found = detect_manifestations(agent_id, dispositions.get(agent_id), session_messages)
+        if not found:
+            continue
+        payload = {"preset": preset_name, "manifestations": [m.model_dump() for m in found]}
+        disposition_manifestations.extend(payload["manifestations"])
+        logger.log(build_message(
+            session_id, "internal", "central", "central",
+            f"disposition.manifest.{agent_id}", payload,
+        ))
 
     # Apply each agent's uncertainty policy to its result
     for agent_id, result in sub_agent_results.items():
@@ -302,6 +355,10 @@ async def run(
         forced_blocks=forced_blocks,
         dispositions_used=active_disps,
         escalations=escalations,
+        delegation_chain=[d.model_dump() for d in delegation_chain],
+        containment_checks=[c.model_dump() for c in containment_checks],
+        commitment_breaches=commitment_breaches,
+        disposition_manifestations=disposition_manifestations,
     )
 
     # Restore compliance max_revisions to base value

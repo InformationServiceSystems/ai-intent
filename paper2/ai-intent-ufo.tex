@@ -1,0 +1,126 @@
+% Follow-up to the ER 2026 AI-Intent paper.
+% Working skeleton. Springer LNCS format.
+
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+\lstset{basicstyle=\ttfamily\footnotesize, breaklines=true, frame=single}
+\newcommand{\uml}[1]{\guillemotleft #1\guillemotright}
+\newcommand{\todo}[1]{\textcolor{red}{[#1]}}
+
+\begin{document}
+
+\title{Commitments, Dispositions and Traces:\\
+An Ontological Account of Accountable Delegation\\
+in Multi-Agent AI Systems}
+\titlerunning{Commitments, Dispositions and Traces}
+
+\author{\todo{authors}}
+\institute{\todo{institute}}
+
+\maketitle
+
+\begin{abstract}
+\todo{150 words. Three open questions left by AI-Intent (ER 2026): accountable to whom, what a disposition is formally, and whether an auditor can query a trace without reading code. UFO-C commitments and claims, UFO dispositions and a gUFO export answer them. Reference implementation; evaluation E1 to E4; two corrections to the earlier grounding.}
+\keywords{Conceptual modeling \and UFO \and Multi-agent systems \and Accountability \and Delegation \and Dispositions}
+\end{abstract}
+
+%=====================================================================
+\section{Introduction}
+\label{sec:intro}
+%=====================================================================
+\todo{Recall AI-Intent in four sentences: Mandate, Intent Enforcement, Accountability Trace; Compliance Agent as a gate; zero forced-pass over 190 evaluations.}
+
+\todo{State the three questions the ER 2026 paper leaves open.}
+\begin{enumerate}
+  \item Accountable to whom? The trace records events; the model has no normative relation between delegator and delegatee.
+  \item What is a disposition? Presets are prompt text and a score; manifestation is undefined.
+  \item Can a regulator query a trace? Integrity conditions live in scoring code.
+\end{enumerate}
+
+\todo{Claim: UFO-C, UFO-A/B and gUFO answer them, and the answers are implementable. Contributions C1 to C4 as in PLAN.md. Paper outline.}
+
+%=====================================================================
+\section{Background}
+\label{sec:background}
+%=====================================================================
+\subsection{UFO in the extent needed}
+\todo{Endurants and perdurants; modes inhere in endurants; extrinsic modes externally depend on other individuals; relators mediate; events are non-repeatable and bring about situations; dispositions are intrinsic modes manifested in events when a triggering situation obtains. UFO-C: social commitments and claims, relators constituted by them. gUFO as the OWL rendering: classes and properties used here (\texttt{gufo:Relator}, \texttt{gufo:ExtrinsicMode}, \texttt{gufo:IntrinsicMode}, \texttt{gufo:Event}, \texttt{gufo:Situation}, \texttt{gufo:inheresIn}, \texttt{gufo:externallyDependsOn}, \texttt{gufo:mediates}, \texttt{gufo:historicallyDependsOn}, \texttt{gufo:manifestedIn}, \texttt{gufo:broughtAbout}).}
+
+\subsection{AI-Intent}
+\todo{The nine constructs and their ER 2026 grounding (table). Note what the present paper changes: the Compliance Verdict row and the Src column, see Section~\ref{sec:corrections}.}
+
+%=====================================================================
+\section{Delegation as Commitment and Claim}
+\label{sec:delegation}
+%=====================================================================
+\todo{Definitions. A Delegation $D(p, a, M)$ is a relator mediating delegator $p$ and delegatee $a$, constituted by a Commitment $C$ inhering in $a$ and externally dependent on $p$, and a Claim $K$ inhering in $p$ and externally dependent on $a$. The content of $C$ is the Mandate $M$: its scope and its boundary constraints $\langle \mathit{text}_i, \phi_i, \tau_i\rangle$.}
+
+\todo{Chain. Principal $\to$ central $\to$ \{stocks, bonds, materials\}. Each sub-delegation has a parent.}
+
+\paragraph{Containment.}
+\todo{Condition: for every bounded parameter $r$ of a sub-mandate with governing parameter $r'$ of the parent, $M_{\mathrm{sub}}(r) \le M_{\mathrm{parent}}(r')$. Structural conditions: same Principal, parent reference. Checkable at design time; Listing of \texttt{check\_chain\_containment}.}
+
+\paragraph{Accountability resolution.}
+\todo{A forced block on $a$ brings about a Commitment Breach situation; the answerable parties are the delegators along the path to the Principal. Log method \texttt{delegation.breach}. Contrast with ER 2026, where a block was a verdict and a note.}
+
+%=====================================================================
+\section{Dispositions and Their Manifestation}
+\label{sec:dispositions}
+%=====================================================================
+\todo{Definition. A Disposition $\delta = \langle k, a, g, S, R\rangle$: kind $k$, bearer $a$, degree $g \in [0,1]$, triggering situation $S$, characteristic rule set $R \subseteq$ registry. A Manifestation of $\delta$ is a rejection or block event $e$ targeting $a$ whose violated rules intersect $R$, provided $g \ge \theta$.}
+
+\todo{Five kinds and their rule sets (table from \texttt{MANIFESTATION\_MAP}); justification per kind.}
+
+\todo{Relation to the gate. Disposition Containment (ER 2026) restated: the gate contains a disposition if every manifestation is a rejection and no manifestation is a delivery. Zero forced-pass is then the statement that no manifestation ever reached delivery.}
+
+%=====================================================================
+\section{Traces as Situations and Integrity Queries}
+\label{sec:traces}
+%=====================================================================
+\todo{Export mapping (table): Session and Log Entry as events; Proposed Action as event; Verdict as intrinsic mode of the target agent, historically dependent on the action; Trace as the situation the session brings about; Delegation, Commitment, Claim, Disposition as above.}
+
+\todo{Eight integrity checks Q1 to Q8 (table: id, invariant, what a violating row means). Listing of Q2 as an example.}
+
+\todo{Why the export reads only the log: source-of-truth invariant; absence of a chain in a session is itself auditable.}
+
+%=====================================================================
+\section{Reference Implementation and Evaluation}
+\label{sec:evaluation}
+%=====================================================================
+\todo{Modules and hooks (PLAN.md Section 4). E1 containment; E2 attribution agreement over TC-16 to TC-19; E3 invariants over the 190 archived sessions and over new sessions; E4 cost.}
+
+\todo{Results tables. Threats to validity: rule-set attribution is a modelling decision; archived sessions lack the new methods; model dependence.}
+
+%=====================================================================
+\section{Related Work}
+\label{sec:related}
+%=====================================================================
+\todo{UFO-C commitments and claims; service ontologies built on them. Delegation in Tropos and GAIA. Norm representations: LegalRuleML, ODRL. Provenance: PROV-O as the nearest standard to the trace export; argue what gUFO adds (modes, relators, dispositions) and what PROV-O adds (tooling), and whether to align.}
+
+%=====================================================================
+\section{Corrections to the Earlier Grounding}
+\label{sec:corrections}
+%=====================================================================
+\todo{(a) Verdict as mode of an event is ill-formed; corrected reading. (b) Derived versus design: all nine assignments are choices; the useful distinction is whether the category fixes the construct's formal behaviour completely. (c) Intent Scope as sortal universal: a scope string carries no identity principle; move to the second group or argue the sortal reading.}
+
+%=====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%=====================================================================
+\todo{Answers to RQ1 to RQ3. What UFO contributes beyond categorisation. Future work: PROV-O alignment, defeasible commitments, Mandate as normative description.}
+
+\bibliographystyle{splncs04}
+\bibliography{../paper/bibliography}
+
+\end{document}

@@ -756,6 +756,18 @@ async def _run_semantic_checks(
     )]
 
 
+def _latest_action_message_id(session_id: str, target_agent: str, checkpoint: str, logger: Any) -> str | None:
+    """Return the log id of the most recent Proposed Action this verdict evaluates, so the verdict's provenance is explicit."""
+    method = {"routing": "intent.route", "synthesis": "intent.synthesize"}.get(checkpoint, f"{target_agent}.result")
+    try:
+        for m in reversed(logger.get_session(session_id)):
+            if m.method == method:
+                return m.id
+    except Exception:
+        return None
+    return None
+
+
 def _fuzzy_rule_match(constraint: str, rule: str) -> bool:
     """Check if a constraint text roughly matches a deterministic rule name."""
     # Extract significant words from both and check overlap
@@ -899,7 +911,7 @@ class ComplianceAgent:
         from uuid import uuid4
         verdict = ComplianceVerdict(
             approved=all_passed,
-            message_id=str(uuid4()),
+            message_id=_latest_action_message_id(session_id, target_agent, checkpoint, logger) or str(uuid4()),
             target_agent=target_agent,
             checkpoint=checkpoint,
             rejection_reasons=[r.detail for r in failures],
@@ -929,7 +941,9 @@ class ComplianceAgent:
             detail=f"Agent returned an error: {payload.get('analysis', 'unknown')[:200]}",
         )
         verdict = ComplianceVerdict(
-            approved=False, message_id=str(uuid4()), target_agent=agent_id,
+            approved=False,
+            message_id=_latest_action_message_id(session_id, agent_id, "analysis", logger) or str(uuid4()),
+            target_agent=agent_id,
             checkpoint="analysis",
             rejection_reasons=[error_result.detail],
             revision_instruction="Your previous response could not be parsed. Please respond with valid JSON only.",
@@ -950,7 +964,9 @@ class ComplianceAgent:
             passed=True, detail="Agent declined the request as outside its mandate",
         )
         verdict = ComplianceVerdict(
-            approved=True, message_id=str(uuid4()), target_agent=agent_id,
+            approved=True,
+            message_id=_latest_action_message_id(session_id, agent_id, "analysis", logger) or str(uuid4()),
+            target_agent=agent_id,
             checkpoint="analysis",
             deterministic_results=[decline_result],
             overall_status="approved",

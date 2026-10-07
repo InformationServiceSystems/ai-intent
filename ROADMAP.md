@@ -72,6 +72,16 @@ ORM addresses this at design time, with three properties the current encoding la
 - **Deterministic routing for evaluation.** The orchestrator routes non-deterministically, which leaves Mandate Enforcement (ME) untestable in sessions where the target agent is not invoked. Add a routing override for the evaluation runner so that out-of-scope test cases always reach their target agent, and report ME both with and without the override.
 - **Accountability note as a projection of the trace.** Generate the human-readable accountability note from the Accountability Trace rather than asking the model to write it, so that trace completeness (ATC) no longer depends on instruction following.
 
+## 5. Follow-up paper: substantive use of UFO
+
+**Status:** in progress since 6 October 2026. Plan and paper skeleton under `paper2/`. The ER 2026 paper uses UFO for categorisation only; the follow-up uses three parts of UFO as model content.
+
+- **5.1 Delegation as commitment and claim (UFO-C).** `agents/delegation.py` builds the chain Principal to central to sub-agents as relators constituted by a Commitment and a Claim, checks that each sub-mandate is contained in its parent, and resolves a forced block to the chain of answerable parties. Logged as `delegation.establish` and `delegation.breach.{agent}`.
+- **5.2 Dispositions as model constructs (UFO-A/B).** `agents/dispositions.py` adds Disposition (bearer, degree, triggering situation, characteristic rule set) and attributes rejections to dispositions deterministically. Logged as `disposition.manifest.{agent}`.
+- **5.3 Traces as gUFO graphs.** `mcp/gufo_export.py` exports a session as a gUFO-typed RDF graph from the log alone; `evaluation/sparql_checks.py` states eight integrity invariants as SPARQL queries. Run with `python evaluation/sparql_checks.py --all`.
+
+*Depends on* nothing in sections 1 to 4; *relates to* 2.2, which the gUFO export makes concrete.
+
 ## Dependency summary
 
 | Item | Depends on | Enables |
