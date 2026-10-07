@@ -1,0 +1,18 @@
+# Ollama server for the AI-Intent evaluation suite on the UdS HPC cluster
+# (HTCondor, docker universe). One top-tier GPU node, ten parallel request
+# slots so ten runner processes can drive it through an SSH tunnel.
+# Submit on the login node:  condor_submit ollama-aiintent.sub
+universe          = docker
+docker_image      = ollama/ollama:latest
+arguments         = serve
+environment       = "OLLAMA_HOST=0.0.0.0:11434 OLLAMA_KEEP_ALIVE=24h OLLAMA_NUM_PARALLEL=10 OLLAMA_MAX_LOADED_MODELS=1"
+mount             = /home/wolfgang.maass/.ollama:/root/.ollama
+output            = ollama-aiintent.out
+error             = ollama-aiintent.err
+log               = ollama-aiintent.log
+request_memory    = 64G
+request_cpus      = 8
+request_gpus      = 1
+Requirements = (Machine == "tig.hpc.uni-saarland.de" || Machine == "tyr1.hpc.uni-saarland.de" || Machine == "tyr2.hpc.uni-saarland.de" || Machine == "forseti.hpc.uni-saarland.de" || Machine == "fjolnir.hpc.uni-saarland.de" || Machine == "fornjoter.hpc.uni-saarland.de")
+Rank = (Machine == "tig.hpc.uni-saarland.de") * 3 + (Machine == "tyr1.hpc.uni-saarland.de") * 3 + (Machine == "tyr2.hpc.uni-saarland.de") * 3 + (Machine == "forseti.hpc.uni-saarland.de") * 2 + (Machine == "fjolnir.hpc.uni-saarland.de") * 2 + (Machine == "fornjoter.hpc.uni-saarland.de") * 2
+queue
