@@ -2,7 +2,7 @@
 
 Working title: *Commitments, Dispositions and Traces: An Ontological Account of Accountable Delegation in Multi-Agent AI Systems*
 
-Status: planning started 6 October 2026. The ER 2026 paper is frozen at tag `er2026-v1.0`; everything here builds on `main`.
+Status: planning started 6 October 2026; complete draft with results of the second campaign on 7 October 2026 (`ai-intent-ufo.tex`, 14 pages LNCS, references from page 13). Awaiting author review before the third campaign. The ER 2026 paper is frozen at tag `er2026-v1.0`; everything here builds on `main`.
 
 ## 1. Motivation
 
