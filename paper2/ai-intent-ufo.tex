@@ -1,5 +1,5 @@
 % Follow-up to the ER 2026 AI-Intent paper.
-% Working skeleton. Springer LNCS format.
+% Working draft. Springer LNCS format.
 
 \documentclass[runningheads]{llncs}
 
@@ -14,9 +14,10 @@
 \usepackage{tabularx}
 \usepackage{multirow}
 
-\lstset{basicstyle=\ttfamily\footnotesize, breaklines=true, frame=single}
+\lstset{basicstyle=\ttfamily\footnotesize, breaklines=true, frame=single, aboveskip=6pt, belowskip=6pt}
 \newcommand{\uml}[1]{\guillemotleft #1\guillemotright}
 \newcommand{\todo}[1]{\textcolor{red}{[#1]}}
+\newcommand{\code}[1]{\texttt{#1}}
 
 \begin{document}
 
@@ -55,52 +56,168 @@ in Multi-Agent AI Systems}
 \label{sec:background}
 %=====================================================================
 \subsection{UFO in the extent needed}
-\todo{Endurants and perdurants; modes inhere in endurants; extrinsic modes externally depend on other individuals; relators mediate; events are non-repeatable and bring about situations; dispositions are intrinsic modes manifested in events when a triggering situation obtains. UFO-C: social commitments and claims, relators constituted by them. gUFO as the OWL rendering: classes and properties used here (\texttt{gufo:Relator}, \texttt{gufo:ExtrinsicMode}, \texttt{gufo:IntrinsicMode}, \texttt{gufo:Event}, \texttt{gufo:Situation}, \texttt{gufo:inheresIn}, \texttt{gufo:externallyDependsOn}, \texttt{gufo:mediates}, \texttt{gufo:historicallyDependsOn}, \texttt{gufo:manifestedIn}, \texttt{gufo:broughtAbout}).}
+\label{sec:ufo}
+\todo{Endurants and perdurants; modes inhere in endurants; extrinsic modes externally depend on other individuals; relators mediate; events are non-repeatable and bring about situations; dispositions are intrinsic modes manifested in events when a triggering situation obtains. UFO-C: social commitments and claims, relators constituted by them. gUFO as the OWL rendering: classes and properties used here (\code{gufo:Relator}, \code{gufo:ExtrinsicMode}, \code{gufo:IntrinsicMode}, \code{gufo:Event}, \code{gufo:Situation}, \code{gufo:inheresIn}, \code{gufo:externallyDependsOn}, \code{gufo:mediates}, \code{gufo:historicallyDependsOn}, \code{gufo:manifestedIn}, \code{gufo:broughtAbout}).}
 
 \subsection{AI-Intent}
+\label{sec:aiintent}
 \todo{The nine constructs and their ER 2026 grounding (table). Note what the present paper changes: the Compliance Verdict row and the Src column, see Section~\ref{sec:corrections}.}
 
 %=====================================================================
 \section{Delegation as Commitment and Claim}
 \label{sec:delegation}
 %=====================================================================
-\todo{Definitions. A Delegation $D(p, a, M)$ is a relator mediating delegator $p$ and delegatee $a$, constituted by a Commitment $C$ inhering in $a$ and externally dependent on $p$, and a Claim $K$ inhering in $p$ and externally dependent on $a$. The content of $C$ is the Mandate $M$: its scope and its boundary constraints $\langle \mathit{text}_i, \phi_i, \tau_i\rangle$.}
 
-\todo{Chain. Principal $\to$ central $\to$ \{stocks, bonds, materials\}. Each sub-delegation has a parent.}
+AI-Intent represents delegation structurally: a Mandate names its parent Mandate, and the Principal names the Mandates it owns. The structure says which Mandate refines which; it does not say that anyone owes anything to anyone. UFO-C supplies the missing normative relation. In UFO-C, a social relator is constituted by a commitment of one party towards another and the corresponding claim of the second party against the first. A commitment is an extrinsic mode: it inheres in the committed party and is existentially dependent on the party it is directed to. We apply this pattern to delegation.
+
+\begin{definition}[Delegation]
+\label{def:delegation}
+Let $p$ be a Principal or an Agent, $a$ an Agent, and $M_a$ the Mandate of $a$. A \emph{Delegation} $D(p, a, M_a)$ is a relator that mediates $p$ and $a$ and is constituted by
+\begin{itemize}
+  \item a \emph{Commitment} $C(a \to p, M_a)$: an extrinsic mode inhering in $a$ and externally dependent on $p$, whose content is that $a$ acts only within the intent scope of $M_a$ and never violates a boundary constraint $\langle \mathit{text}_i, \phi_i, \tau_i\rangle$ of $M_a$; and
+  \item a \emph{Claim} $K(p \to a, M_a)$: an extrinsic mode inhering in $p$ and externally dependent on $a$, whose content is that $p$ is entitled to outputs of $a$ that satisfy $M_a$ and to a verdict that names every breach.
+\end{itemize}
+The rule identifiers that operationalise $C$ are the rules of the registry that apply to $a$; we write $R(C)$ for this set.
+\end{definition}
+
+The commitment carries the Mandate's content, the claim carries the entitlement to enforcement. Neither exists without the other, and neither exists without both parties, which is what distinguishes a social relator from a mere attribute of the delegatee.
+
+\paragraph{The chain.}
+In the reference implementation the Principal delegates to the orchestrator (\code{central}) and the orchestrator delegates to the three specialists. Each sub-delegation records its parent, so the chain is a tree rooted at the Principal:
+\[
+D(\mathit{principal}, \mathit{central}, M_c)\ \succ\ D(\mathit{central}, a, M_a)\quad\text{for } a \in \{\mathit{stocks}, \mathit{bonds}, \mathit{materials}\}.
+\]
+The chain is built from the Mandate registry at the start of every session and logged as the event \code{delegation.establish} before any sub-agent is called. A Delegation is therefore never implicit: if it is not in the trace, it did not govern the session.
 
 \paragraph{Containment.}
-\todo{Condition: for every bounded parameter $r$ of a sub-mandate with governing parameter $r'$ of the parent, $M_{\mathrm{sub}}(r) \le M_{\mathrm{parent}}(r')$. Structural conditions: same Principal, parent reference. Checkable at design time; Listing of \texttt{check\_chain\_containment}.}
+A delegator cannot grant more than it holds. We state this as a condition on the chain that is decidable at design time.
+
+\begin{definition}[Mandate containment]
+\label{def:containment}
+Let $D(p, a, M_a)$ have parent $D(q, p, M_p)$ with $p$ an Agent. $M_a$ is \emph{contained} in $M_p$ if (i) $M_a$ names $M_p$ as its parent, (ii) both are owned by the same Principal, and (iii) for every bounded risk parameter $r$ of $M_a$ with governing parameter $r'$ of $M_p$, $M_a(r) \le M_p(r')$.
+\end{definition}
+
+Condition (iii) uses an explicit map from sub-mandate parameters to parent parameters. In the investment domain the map binds the specialists' allocation caps to the orchestrator's cap on any single asset class: a stocks position cap of 10\% and a materials cap of 15\% are both contained in the orchestrator's 40\%, whereas a materials cap raised to 55\% is not. The implementation evaluates the condition in \code{check\_chain\_containment} and logs the result with the chain; a violated containment marks the \code{delegation.establish} event with status \code{constraint\_violation} before the first message is sent. Evaluation E1 (Section~\ref{sec:evaluation}) mutates each bounded parameter above its parent bound and confirms that every mutation is reported.
 
 \paragraph{Accountability resolution.}
-\todo{A forced block on $a$ brings about a Commitment Breach situation; the answerable parties are the delegators along the path to the Principal. Log method \texttt{delegation.breach}. Contrast with ER 2026, where a block was a verdict and a note.}
+The ER 2026 Compliance Agent drops a message that cannot be made compliant within the revision budget and records a \emph{forced block}. With Definition~\ref{def:delegation} in place, a forced block has a normative reading: the blocked agent has breached its Commitment.
+
+\begin{definition}[Commitment breach]
+\label{def:breach}
+A forced block of agent $a$ in session $s$ with violated rules $V$ brings about a situation \emph{Commitment Breach} $B(a, s, V)$ in which $C(a \to p, M_a)$ is unfulfilled. The parties answerable for $B$ are the delegators along the path from $D(p, a, M_a)$ to the root: $p$, the delegator of $p$, and so on up to the Principal.
+\end{definition}
+
+The orchestrator resolves the path from the logged chain and records it as \code{delegation.breach.\{a\}} together with $V$ and with $V \cap R(C)$, the violated rules the agent had actually committed to. The last intersection is not idle: Section~\ref{sec:evaluation} reports that it exposed five rules the gate applied without their being part of any commitment.
 
 %=====================================================================
 \section{Dispositions and Their Manifestation}
 \label{sec:dispositions}
 %=====================================================================
-\todo{Definition. A Disposition $\delta = \langle k, a, g, S, R\rangle$: kind $k$, bearer $a$, degree $g \in [0,1]$, triggering situation $S$, characteristic rule set $R \subseteq$ registry. A Manifestation of $\delta$ is a rejection or block event $e$ targeting $a$ whose violated rules intersect $R$, provided $g \ge \theta$.}
 
-\todo{Five kinds and their rule sets (table from \texttt{MANIFESTATION\_MAP}); justification per kind.}
+The ER 2026 evaluation stressed the gate with four disposition presets (neutral, aggressive broker, reckless portfolio manager, groupthink) and measured Disposition Containment as a score. In the implementation a preset is a vector of five numbers per agent and a sentence prepended to the system prompt. The model said nothing about what a disposition is or what it means for one to show.
 
-\todo{Relation to the gate. Disposition Containment (ER 2026) restated: the gate contains a disposition if every manifestation is a rejection and no manifestation is a delivery. Zero forced-pass is then the statement that no manifestation ever reached delivery.}
+UFO has an account. A disposition is an intrinsic mode of its bearer that is manifested in an event when a triggering situation obtains; it may exist without ever being manifested. We adopt this account with the five preset dimensions as kinds.
+
+\begin{definition}[Disposition]
+\label{def:disposition}
+A \emph{Disposition} is a tuple $\delta = \langle k, a, g, S_k, R_k\rangle$ with kind $k \in \{\mathit{self\_serving}, \mathit{risk\_seeking}, \mathit{overconfident}, \mathit{anti\_customer}, \mathit{conformist}\}$, bearer $a$ an Agent, degree $g \in [0, 1]$, a triggering situation $S_k$ described as a class of Proposed Actions, and a characteristic rule set $R_k$ drawn from the registry. An agent bears one Disposition per kind with positive degree.
+\end{definition}
+
+\begin{definition}[Manifestation]
+\label{def:manifestation}
+Let $e$ be a compliance rejection or block event in session $s$ that targets agent $a$ and names violated rules $V_e$. $e$ is a \emph{manifestation} of $\delta = \langle k, a, g, S_k, R_k\rangle$ if $g \ge \theta$ and $V_e \cap R_k \neq \emptyset$. The attributed rules of the manifestation are $V_e \cap R_k$.
+\end{definition}
+
+The threshold $\theta$ is $0.5$ in the implementation; the neutral preset's degrees of $0.1$ lie below it, so under the neutral preset no rejection is ever attributed to a disposition. The characteristic rule sets encode what each kind of pressure is expected to produce: a risk-seeking agent breaches caps and leverage prohibitions, an overconfident one omits required disclosures, a conformist one follows another agent out of its own scope. Table~\ref{tab:kinds} lists the sets. \todo{table from MANIFESTATION\_MAP with one-line justification per kind}
+
+Attribution is deterministic and reads only the log: after the sub-agent calls complete, the orchestrator scans the session's rejection and block events, applies Definition~\ref{def:manifestation} for every Disposition the agent bears, and records the result as \code{disposition.manifest.\{a\}}. A rejection may manifest several dispositions at once, which is as it should be; a cap breach by a reckless agent is both risk-seeking and self-serving.
+
+\paragraph{Disposition Containment restated.}
+With these definitions the ER 2026 metric becomes a statement about dispositions and the gate. The gate \emph{contains} a disposition $\delta$ in session $s$ if every manifestation of $\delta$ in $s$ is a rejection or a block, and no manifestation is a delivery. The zero-forced-pass result of ER 2026 is then the statement that across 190 sessions no manifestation of any disposition reached delivery. The present paper adds what the earlier one could not say: which dispositions were manifested, how often, and in which rules.
 
 %=====================================================================
 \section{Traces as Situations and Integrity Queries}
 \label{sec:traces}
 %=====================================================================
-\todo{Export mapping (table): Session and Log Entry as events; Proposed Action as event; Verdict as intrinsic mode of the target agent, historically dependent on the action; Trace as the situation the session brings about; Delegation, Commitment, Claim, Disposition as above.}
 
-\todo{Eight integrity checks Q1 to Q8 (table: id, invariant, what a violating row means). Listing of Q2 as an example.}
+The ER 2026 paper grounds the Accountability Trace as a situation and the Log Entry as an event, and leaves it there. The grounding becomes useful when the trace is exported in a form that carries it. We export every session as an RDF graph typed with gUFO, the OWL rendering of UFO, and state the framework's invariants as SPARQL queries over that graph.
 
-\todo{Why the export reads only the log: source-of-truth invariant; absence of a chain in a session is itself auditable.}
+\paragraph{Export mapping.}
+Table~\ref{tab:mapping} gives the mapping. Three decisions deserve comment.
+
+\begin{table}[t]
+\centering
+\caption{Export of a session to gUFO. Every individual is created from the MCP log alone.}
+\label{tab:mapping}
+\begin{tabularx}{\textwidth}{@{}lXX@{}}
+\toprule
+\textbf{Construct} & \textbf{gUFO typing} & \textbf{Source in the log} \\
+\midrule
+Session & \code{gufo:Event} & the session id \\
+Log Entry & \code{gufo:Event}, proper part of the Session & every message \\
+Proposed Action & \code{gufo:Event} & \code{intent.route}, \code{\{a\}.result}, \code{intent.synthesize} \\
+Compliance Verdict & \code{gufo:IntrinsicMode} inhering in the target agent, \code{historicallyDependsOn} the evaluated Proposed Action & \code{compliance.approve.*}, \code{compliance.reject.*}, \code{compliance.block.*} \\
+Accountability Trace & \code{gufo:Situation} brought about by the Session, comprising every Log Entry & derived \\
+Delegation & \code{gufo:Relator} mediating delegator and delegatee & \code{delegation.establish} \\
+Commitment, Claim & \code{gufo:ExtrinsicMode}, inhering in one party, externally dependent on the other & \code{delegation.establish} \\
+Disposition & \code{gufo:IntrinsicMode} with degree, \code{manifestedIn} a rejection event & \code{disposition.active}, \code{disposition.manifest.*} \\
+Commitment Breach & \code{gufo:Situation} brought about by the breach event & \code{delegation.breach.*} \\
+Principal, Agent & \code{gufo:FunctionalComplex} & message endpoints \\
+Mandate & \code{gufo:Object} (see Section~\ref{sec:corrections}) & \code{delegation.establish} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+First, the Compliance Verdict is a mode of the \emph{agent}, not of the Proposed Action. Modes inhere in endurants, and a Proposed Action is an event; the ER 2026 table said otherwise and is corrected here. The verdict's dependence on the action it evaluated is historical, and the export records it with \code{gufo:historicallyDependsOn}. To make that link exact rather than inferred, the Compliance Agent now writes the log id of the evaluated action into every verdict.
+
+Second, the export reads nothing but the log. Delegations, dispositions and manifestations appear in the graph only if the orchestrator logged them. This keeps the invariant of ER 2026 that the log is the source of truth, and it has a consequence the evaluation exploits: a session in which no commitment was logged is a session whose breaches have no answerable party, and the queries say so.
+
+Third, gUFO has no class for normative descriptions, so the Mandate is typed as \code{gufo:Object}. The typing is weak and we say so; Section~\ref{sec:corrections} discusses it.
+
+\paragraph{Integrity queries.}
+Eight invariants of the framework are stated as SPARQL queries whose result set must be empty (Table~\ref{tab:checks}). Each row returned is a violation with the individuals involved. The queries are short; Q2, the restatement of the containment claim, is shown in full.
+
+\begin{table}[t]
+\centering
+\caption{Integrity checks. Each is a SPARQL query over the session graph; a returned row is a violation.}
+\label{tab:checks}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Id} & \textbf{Invariant} \\
+\midrule
+Q1 & A Compliance Verdict historically depends on exactly one Proposed Action. \\
+Q2 & After a block of agent $a$ no final approval of $a$ occurs in the same session. \\
+Q3 & Every blocked agent bears a Commitment, so its breach has an answerable party. \\
+Q4 & Every Commitment Breach is answerable to the session's Principal. \\
+Q5 & A Disposition is manifested only in events targeting its bearer, and only with positive degree. \\
+Q6 & Every Proposed Action at the analysis checkpoint receives a verdict. \\
+Q7 & The Accountability Trace comprises every Log Entry of the session. \\
+Q8 & Every rule a verdict names against $a$ belongs to the Commitment of $a$. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{lstlisting}[caption={Q2: no delivery after a block. Entries carry a sequence number in log order.},label={lst:q2}]
+SELECT ?agent ?block ?final WHERE {
+  ?block a aii:LogEntry ; aii:method ?bm ; aii:targetAgent ?agent ; aii:sequence ?sb .
+  FILTER(STRSTARTS(STR(?bm), "compliance.block."))
+  ?final a aii:LogEntry ; aii:method ?fm ; aii:targetAgent ?agent ; aii:sequence ?sf .
+  FILTER(STRSTARTS(STR(?fm), "compliance.approve.") && STRENDS(STR(?fm), ".final"))
+  FILTER(?sf > ?sb)
+}
+\end{lstlisting}
+
+Q2 is the claim that gives AI-Intent its name for bounded autonomy, now readable by an auditor who has never seen the Python code. Q3, Q4 and Q8 are the claims of Section~\ref{sec:delegation}; Q5 is the claim of Section~\ref{sec:dispositions}; Q1, Q6 and Q7 are the structural conditions on which the others rest.
 
 %=====================================================================
 \section{Reference Implementation and Evaluation}
 \label{sec:evaluation}
 %=====================================================================
-\todo{Modules and hooks (PLAN.md Section 4). E1 containment; E2 attribution agreement over TC-16 to TC-19; E3 invariants over the 190 archived sessions and over new sessions; E4 cost.}
+\todo{Modules and hooks (PLAN.md Section 4). E1 containment; E2 attribution agreement over TC-16 to TC-19; E3 invariants over regenerated sessions, with the 21 surviving archived sessions as the before-hooks comparison (e3-archive-checks.md); E4 cost: triples per session and query time.}
 
-\todo{Results tables. Threats to validity: rule-set attribution is a modelling decision; archived sessions lack the new methods; model dependence.}
+\todo{Finding from Q8: five disposition-integrity rules applied by the gate were absent from the registry and hence from every commitment; registered after the finding. State this as an example of the checks catching a specification gap that the ER 2026 evaluation could not see.}
+
+\todo{Results tables from paper2/e2-e3-results.md. Threats to validity: rule-set attribution is a modelling decision; model dependence; the regenerated sessions are not the ER 2026 sessions.}
 
 %=====================================================================
 \section{Related Work}
@@ -112,7 +229,7 @@ in Multi-Agent AI Systems}
 \section{Corrections to the Earlier Grounding}
 \label{sec:corrections}
 %=====================================================================
-\todo{(a) Verdict as mode of an event is ill-formed; corrected reading. (b) Derived versus design: all nine assignments are choices; the useful distinction is whether the category fixes the construct's formal behaviour completely. (c) Intent Scope as sortal universal: a scope string carries no identity principle; move to the second group or argue the sortal reading.}
+\todo{(a) Verdict as mode of an event is ill-formed; corrected reading (Section~\ref{sec:traces}). (b) Derived versus design: all nine assignments are choices; the useful distinction is whether the category fixes the construct's formal behaviour completely. (c) Intent Scope as sortal universal: a scope string carries no identity principle; move to the second group or argue the sortal reading. (d) Mandate has no gUFO class; propose aii:Mandate with a documented reading as normative description.}
 
 %=====================================================================
 \section{Conclusion}
@@ -121,6 +238,6 @@ in Multi-Agent AI Systems}
 \todo{Answers to RQ1 to RQ3. What UFO contributes beyond categorisation. Future work: PROV-O alignment, defeasible commitments, Mandate as normative description.}
 
 \bibliographystyle{splncs04}
-\bibliography{../paper/bibliography}
+\bibliography{../paper/bibliography,bibliography2}
 
 \end{document}
