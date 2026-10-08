@@ -1,0 +1,380 @@
+@prefix : <https://github.com/InformationServiceSystems/ai-intent/ontology/ontouml##>.
+@prefix gufo: <http://purl.org/nemo/gufo#>.
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
+@prefix owl: <http://www.w3.org/2002/07/owl#>.
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#>.
+
+<https://github.com/InformationServiceSystems/ai-intent/ontology/ontouml#> rdf:type owl:Ontology;
+    owl:imports gufo:.
+:Principal rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Principal"@en.
+:Agent rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Agent"@en.
+:Orchestrator rdf:type owl:Class, gufo:SubKind, owl:NamedIndividual;
+    rdfs:label "Orchestrator"@en.
+:Specialist rdf:type owl:Class, gufo:SubKind, owl:NamedIndividual;
+    rdfs:label "Specialist"@en.
+:Delegator rdf:type owl:Class, gufo:RoleMixin, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Delegator"@en.
+:PrincipalAsDelegator rdf:type owl:Class, gufo:Role, owl:NamedIndividual;
+    rdfs:label "Principal as Delegator"@en.
+:OrchestratorAsDelegator rdf:type owl:Class, gufo:Role, owl:NamedIndividual;
+    rdfs:label "Orchestrator as Delegator"@en.
+:Delegatee rdf:type owl:Class, gufo:Role, owl:NamedIndividual;
+    rdfs:label "Delegatee"@en.
+:Mandate rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Mandate"@en;
+    rdfs:comment "Normative description: intent scope, boundary constraints, risk parameters. Content of a Commitment."@en.
+:BoundaryConstraint rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:IntrinsicMode;
+    rdfs:label "Boundary Constraint"@en;
+    rdfs:comment "Negative duty <text, predicate, deontic type> borne by the Mandate."@en.
+:RegulatoryRule rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Regulatory Rule"@en.
+:RegulatoryFramework rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:FunctionalComplex;
+    rdfs:label "Regulatory Framework"@en.
+:Delegation rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:Relator;
+    rdfs:label "Delegation"@en.
+:Commitment rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:ExtrinsicMode;
+    rdfs:label "Commitment"@en.
+:Claim rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:ExtrinsicMode;
+    rdfs:label "Claim"@en.
+:Session rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:subClassOf gufo:Event;
+    rdfs:label "Session"@en.
+:LogEntry rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:subClassOf gufo:Event;
+    rdfs:label "Log Entry"@en.
+:ProposedAction rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:label "Proposed Action"@en.
+:ComplianceEvent rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:label "Compliance Event"@en.
+:Approval rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:label "Approval"@en.
+:Rejection rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:label "Rejection"@en.
+:Block rdf:type owl:Class, gufo:EventType, owl:NamedIndividual;
+    rdfs:label "Block"@en.
+:ComplianceVerdict rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:IntrinsicMode;
+    rdfs:label "Compliance Verdict"@en.
+:Disposition rdf:type owl:Class, gufo:Kind, owl:NamedIndividual;
+    rdfs:subClassOf gufo:IntrinsicMode;
+    rdfs:label "Disposition"@en;
+    rdfs:comment "Kind, degree in [0,1], triggering situation and characteristic rule set."@en.
+:AccountabilityTrace rdf:type owl:Class, gufo:SituationType, owl:NamedIndividual;
+    rdfs:subClassOf gufo:Situation;
+    rdfs:label "Accountability Trace"@en.
+:CommitmentBreach rdf:type owl:Class, gufo:SituationType, owl:NamedIndividual;
+    rdfs:subClassOf gufo:Situation;
+    rdfs:label "Commitment Breach"@en.
+:Orchestrator rdfs:subClassOf :Agent.
+:Specialist rdfs:subClassOf :Agent.
+:PrincipalAsDelegator rdfs:subClassOf :Principal.
+:OrchestratorAsDelegator rdfs:subClassOf :Orchestrator.
+:PrincipalAsDelegator rdfs:subClassOf :Delegator.
+:OrchestratorAsDelegator rdfs:subClassOf :Delegator.
+:Delegatee rdfs:subClassOf :Agent.
+:ProposedAction rdfs:subClassOf :LogEntry.
+:ComplianceEvent rdfs:subClassOf :LogEntry.
+:Approval rdfs:subClassOf :ComplianceEvent.
+:Rejection rdfs:subClassOf :ComplianceEvent.
+:Block rdfs:subClassOf :ComplianceEvent.
+[ rdf:type owl:AllDisjointClasses ] owl:members (:Orchestrator :Specialist).
+:Agent owl:equivalentClass [
+  rdf:type owl:Class;
+  owl:unionOf (:Orchestrator :Specialist)
+].
+[ rdf:type owl:AllDisjointClasses ] owl:members (:Approval :Rejection :Block).
+:ComplianceEvent owl:equivalentClass [
+  rdf:type owl:Class;
+  owl:unionOf (:Approval :Rejection :Block)
+].
+:constraintInheresInMandate rdf:type owl:ObjectProperty;
+    rdfs:domain :BoundaryConstraint;
+    rdfs:range :Mandate;
+    rdfs:label "constraint inheres in mandate"@en;
+    rdfs:subPropertyOf gufo:inheresIn.
+:operationalisedBy rdf:type owl:ObjectProperty;
+    rdfs:domain :BoundaryConstraint;
+    rdfs:range :RegulatoryRule;
+    rdfs:label "operationalised by"@en.
+:drawnFrom rdf:type owl:ObjectProperty;
+    rdfs:domain :RegulatoryRule;
+    rdfs:range :RegulatoryFramework;
+    rdfs:label "drawn from"@en.
+:subMandateOf rdf:type owl:ObjectProperty;
+    rdfs:domain :Mandate;
+    rdfs:range :Mandate;
+    rdfs:label "sub-mandate of"@en.
+:owns rdf:type owl:ObjectProperty;
+    rdfs:domain :Principal;
+    rdfs:range :Mandate;
+    rdfs:label "owns"@en.
+:governedBy rdf:type owl:ObjectProperty;
+    rdfs:domain :Agent;
+    rdfs:range :Mandate;
+    rdfs:label "governed by"@en.
+:mediatesDelegator rdf:type owl:ObjectProperty;
+    rdfs:domain :Delegation;
+    rdfs:range :Delegator;
+    rdfs:label "mediates delegator"@en;
+    rdfs:subPropertyOf gufo:mediates.
+:mediatesDelegatee rdf:type owl:ObjectProperty;
+    rdfs:domain :Delegation;
+    rdfs:range :Delegatee;
+    rdfs:label "mediates delegatee"@en;
+    rdfs:subPropertyOf gufo:mediates.
+:commitmentInheresInDelegatee rdf:type owl:ObjectProperty;
+    rdfs:domain :Commitment;
+    rdfs:range :Delegatee;
+    rdfs:label "commitment inheres in delegatee"@en;
+    rdfs:subPropertyOf gufo:inheresIn.
+:commitmentDependsOnDelegator rdf:type owl:ObjectProperty;
+    rdfs:domain :Commitment;
+    rdfs:range :Delegator;
+    rdfs:label "commitment depends on delegator"@en;
+    rdfs:subPropertyOf gufo:externallyDependsOn.
+:claimInheresInDelegator rdf:type owl:ObjectProperty;
+    rdfs:domain :Claim;
+    rdfs:range :Delegator;
+    rdfs:label "claim inheres in delegator"@en;
+    rdfs:subPropertyOf gufo:inheresIn.
+:claimDependsOnDelegatee rdf:type owl:ObjectProperty;
+    rdfs:domain :Claim;
+    rdfs:range :Delegatee;
+    rdfs:label "claim depends on delegatee"@en;
+    rdfs:subPropertyOf gufo:externallyDependsOn.
+:commitmentConstitutesDelegation rdf:type owl:ObjectProperty;
+    rdfs:domain :Commitment;
+    rdfs:range :Delegation;
+    rdfs:label "commitment constitutes delegation"@en.
+:claimConstitutesDelegation rdf:type owl:ObjectProperty;
+    rdfs:domain :Claim;
+    rdfs:range :Delegation;
+    rdfs:label "claim constitutes delegation"@en.
+:counterpartOf rdf:type owl:ObjectProperty;
+    rdfs:domain :Claim;
+    rdfs:range :Commitment;
+    rdfs:label "counterpart of"@en.
+:contentOf rdf:type owl:ObjectProperty;
+    rdfs:domain :Mandate;
+    rdfs:range :Commitment;
+    rdfs:label "content of"@en.
+:parentDelegation rdf:type owl:ObjectProperty;
+    rdfs:domain :Delegation;
+    rdfs:range :Delegation;
+    rdfs:label "parent delegation"@en.
+:properPartOf rdf:type owl:ObjectProperty;
+    rdfs:domain :LogEntry;
+    rdfs:range :Session;
+    rdfs:label "proper part of"@en;
+    rdfs:subPropertyOf gufo:isEventProperPartOf.
+:agentParticipatesInEntry rdf:type owl:ObjectProperty;
+    rdfs:domain :Agent;
+    rdfs:range :LogEntry;
+    rdfs:label "agent participates in entry"@en;
+    rdfs:subPropertyOf gufo:participatedIn.
+:principalParticipatesInSession rdf:type owl:ObjectProperty;
+    rdfs:domain :Principal;
+    rdfs:range :Session;
+    rdfs:label "principal participates in session"@en;
+    rdfs:subPropertyOf gufo:participatedIn.
+:proposes rdf:type owl:ObjectProperty;
+    rdfs:domain :Agent;
+    rdfs:range :ProposedAction;
+    rdfs:label "proposes"@en.
+:verdictInheresInAgent rdf:type owl:ObjectProperty;
+    rdfs:domain :ComplianceVerdict;
+    rdfs:range :Agent;
+    rdfs:label "verdict inheres in agent"@en;
+    rdfs:subPropertyOf gufo:inheresIn.
+:historicallyDependsOn rdf:type owl:ObjectProperty;
+    rdfs:domain :ComplianceVerdict;
+    rdfs:range :ProposedAction;
+    rdfs:label "historically depends on"@en;
+    rdfs:subPropertyOf gufo:historicallyDependsOn.
+:issues rdf:type owl:ObjectProperty;
+    rdfs:domain :ComplianceEvent;
+    rdfs:range :ComplianceVerdict;
+    rdfs:label "issues"@en.
+:violates rdf:type owl:ObjectProperty;
+    rdfs:domain :ComplianceVerdict;
+    rdfs:range :RegulatoryRule;
+    rdfs:label "violates"@en.
+:dispositionInheresInAgent rdf:type owl:ObjectProperty;
+    rdfs:domain :Disposition;
+    rdfs:range :Agent;
+    rdfs:label "disposition inheres in agent"@en;
+    rdfs:subPropertyOf gufo:inheresIn.
+:manifestedInRejection rdf:type owl:ObjectProperty;
+    rdfs:domain :Disposition;
+    rdfs:range :Rejection;
+    rdfs:label "manifested in rejection"@en;
+    rdfs:subPropertyOf gufo:manifestedIn.
+:manifestedInBlock rdf:type owl:ObjectProperty;
+    rdfs:domain :Disposition;
+    rdfs:range :Block;
+    rdfs:label "manifested in block"@en;
+    rdfs:subPropertyOf gufo:manifestedIn.
+:sessionBringsAboutTrace rdf:type owl:ObjectProperty;
+    rdfs:domain :Session;
+    rdfs:range :AccountabilityTrace;
+    rdfs:label "session brings about trace"@en;
+    rdfs:subPropertyOf gufo:broughtAbout.
+:comprises rdf:type owl:ObjectProperty;
+    rdfs:domain :AccountabilityTrace;
+    rdfs:range :LogEntry;
+    rdfs:label "comprises"@en.
+:blockBringsAboutBreach rdf:type owl:ObjectProperty;
+    rdfs:domain :Block;
+    rdfs:range :CommitmentBreach;
+    rdfs:label "block brings about breach"@en;
+    rdfs:subPropertyOf gufo:broughtAbout.
+:breaches rdf:type owl:ObjectProperty;
+    rdfs:domain :CommitmentBreach;
+    rdfs:range :Commitment;
+    rdfs:label "breaches"@en.
+:answerableTo rdf:type owl:ObjectProperty;
+    rdfs:domain :CommitmentBreach;
+    rdfs:range :Delegator;
+    rdfs:label "answerable to"@en.
+:Mandate rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :constraintInheresInMandate ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :BoundaryConstraint
+].
+:BoundaryConstraint rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :constraintInheresInMandate;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Mandate
+].
+:Delegator rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :mediatesDelegator ];
+  owl:someValuesFrom :Delegation
+].
+:Delegation rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :mediatesDelegator;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Delegator
+].
+:Delegatee rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :mediatesDelegatee ];
+  owl:someValuesFrom :Delegation
+].
+:Delegation rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :mediatesDelegatee;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Delegatee
+].
+:Delegatee rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :commitmentInheresInDelegatee ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Commitment
+].
+:Commitment rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :commitmentInheresInDelegatee;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Delegatee
+], [
+  rdf:type owl:Restriction;
+  owl:onProperty :commitmentDependsOnDelegator;
+  owl:someValuesFrom :Delegator
+].
+:Delegator rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :claimInheresInDelegator ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Claim
+].
+:Claim rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :claimInheresInDelegator;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Delegator
+], [
+  rdf:type owl:Restriction;
+  owl:onProperty :claimDependsOnDelegatee;
+  owl:someValuesFrom :Delegatee
+].
+:Agent rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :verdictInheresInAgent ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :ComplianceVerdict
+].
+:ComplianceVerdict rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :verdictInheresInAgent;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Agent
+], [
+  rdf:type owl:Restriction;
+  owl:onProperty :historicallyDependsOn;
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :ProposedAction
+].
+:Agent rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :dispositionInheresInAgent ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Disposition
+].
+:Disposition rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :dispositionInheresInAgent;
+  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Agent
+].
+:Rejection rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :manifestedInRejection ];
+  owl:someValuesFrom :Disposition
+].
+:Block rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :manifestedInBlock ];
+  owl:someValuesFrom :Disposition
+].
+:AccountabilityTrace rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :sessionBringsAboutTrace ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Session
+].
+:Session rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :sessionBringsAboutTrace;
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :AccountabilityTrace
+].
+:CommitmentBreach rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty [ owl:inverseOf :blockBringsAboutBreach ];
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :Block
+].
+:Block rdfs:subClassOf [
+  rdf:type owl:Restriction;
+  owl:onProperty :blockBringsAboutBreach;
+  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger;
+  owl:onClass :CommitmentBreach
+].
