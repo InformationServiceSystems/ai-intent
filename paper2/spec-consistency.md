@@ -26,3 +26,14 @@ Partly. ORM would remove C1 and C3 by construction, because the verbalisation of
 1. Structured output fields in the specialists' responses (ROADMAP 1.2), evaluated before prose extraction.
 2. Replace the two proxy predicates by a set constraint and a threshold constraint over those fields; C2 then becomes empty.
 3. Generate constraint texts from predicates (verbaliser or ORM); C1 and C3 become true by construction rather than by test.
+
+## Update, 8 October 2026, later the same day: single source implemented
+
+`agents/constraint_spec.py` now holds one `ConstraintSpec` per boundary constraint. The manifest text, the predicate and the registry entry are generated from it, and every number is read from the agent's risk parameters (`STOCKS_RISK`, `BONDS_RISK`, `MATERIALS_RISK`, `CENTRAL_RISK` in `agents/manifests.py`). Consequences:
+
+- C1 and C3 hold by construction; the check remains as a regression guard.
+- C2 is empty: the two former proxies state in their text which terms they forbid ("mid-cap, small-cap, micro-cap, penny stock or OTC equities are outside the universe"; "oil, crude, natural gas, ... are not permitted"). They remain term lists over prose until structured outputs allow set and threshold constraints.
+- C4 is unchanged: the duration warning and the rebalancing trigger have no predicate.
+- The Compliance Agent's interpreter is untouched; the oracle test still reproduces it byte for byte with the generated texts.
+
+Roadmap item 2.1 was rewritten accordingly: the ORM principle is applied, the ORM tooling is not, and the conditions under which full ORM would pay off are stated.

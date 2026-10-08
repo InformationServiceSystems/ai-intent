@@ -1,7 +1,7 @@
 """Specification-predicate consistency must hold: text, predicate and manifest agree for every boundary constraint.
 
-C1 (numbers) and C3 (manifest wording) must produce no findings. C2 (term proxies) and C4 (constraints
-without predicates) are known and listed here, so that any new divergence fails this test.
+C1 (numbers), C2 (terms named) and C3 (manifest wording) must produce no findings now that texts are generated
+from the specifications. C4 (constraints without predicates) lists the known cases, so that any new one fails this test.
 
 Runnable without pytest:  python tests/test_spec_consistency.py
 """
@@ -24,7 +24,7 @@ if "openai" not in sys.modules:
 
 from evaluation.spec_consistency import run_all  # noqa: E402
 
-KNOWN_TERM_PROXIES = {"MANIFEST_STOCKS_LARGECAP", "MANIFEST_MATERIALS_APPROVED"}
+KNOWN_TERM_PROXIES: set[str] = set()   # since constraint texts are generated, every forbidden term is named in the text
 KNOWN_WITHOUT_PREDICATE = {
     ("bonds", "Must flag any recommendation that would increase overall portfolio duration above 7 years"),
     ("materials", "Rebalancing trigger: flag to orchestrator if allocation drifts more than ±5% from target"),
@@ -42,7 +42,7 @@ def test_registry_text_equals_manifest_text():
 
 
 def test_term_proxies_are_the_known_ones():
-    """Only the two documented constraints check a proxy term list instead of the stated rule."""
+    """Every term predicate is named in its generated text."""
     found = {f.rule_id for f in run_all() if f.check == "C2_TERMS"}
     assert found == KNOWN_TERM_PROXIES, found
 

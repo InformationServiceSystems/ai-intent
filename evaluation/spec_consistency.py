@@ -1,4 +1,4 @@
-"""Specification-predicate consistency: do the text, the predicate and the manifest agree for every boundary constraint?"""
+"""Specification-predicate consistency: text, predicate and manifest of every boundary constraint are generated from one spec; this check is the regression guard."""
 
 from __future__ import annotations
 
@@ -62,7 +62,9 @@ def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
 
 def _alternatives(pattern: str) -> list[str]:
     """Reduce a regex of alternatives to plain lowercase stems for matching against the text."""
-    cleaned = re.sub(r"\\b|\(\?:|[()\\^$]", "", pattern)
+    cleaned = re.sub(r"\\b", "", pattern)
+    cleaned = cleaned.replace("[- ]?", "-").replace("\\s*", " ").replace("s*", "s")
+    cleaned = re.sub(r"\(\?:|[()\\^$?]", "", cleaned)
     return [a.strip().lower() for a in cleaned.split("|") if a.strip()]
 
 

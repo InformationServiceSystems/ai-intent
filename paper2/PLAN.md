@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| Constraints as a single source (ConstraintSpec) | `agents/constraint_spec.py`; manifests and registry generated from it | ROADMAP 2.1, `paper2/spec-consistency.md` | done 8 Oct 2026; C1 to C3 hold by construction |
 | Specification-predicate consistency check C1 to C4 | `evaluation/spec_consistency.py`, `tests/test_spec_consistency.py` | `paper2/spec-consistency.md` | done 8 Oct 2026; 2 proxy predicates remain, ORM assessed |
 | Accountability tab in the UI | `ui/accountability_panel.py` | chain, breaches, manifestations, Q1 to Q9 per session | done 8 Oct 2026 |
 | OntoUML model, verified and transformed to gUFO | `ontology/ontouml/` (`build_model.js`, `.ontouml.json`, `.gufo.ttl`, `verification.json`), `evaluation/ontouml_alignment.py` | README in `ontology/ontouml/` | done 8 Oct 2026, 0 verification issues, 13/13 constructs aligned |

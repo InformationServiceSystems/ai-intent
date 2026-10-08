@@ -109,7 +109,7 @@ def oracle_stocks(payload):
         regulatory_basis="AgentManifest.stocks"))
     lc = re.search(r"\b(mid[- ]?cap|small[- ]?cap|micro[- ]?cap|penny stock|otc)\b", low)
     out.append(RuleResult(
-        rule="Large-cap equities only: market capitalization must exceed $10 billion",
+        rule="Large-cap equities only: market capitalization must exceed $10 billion; mid-cap, small-cap, micro-cap, penny stock or OTC equities are outside the universe",
         rule_id="MANIFEST_STOCKS_LARGECAP", source="deterministic", passed=lc is None,
         detail=f"Found non-large-cap reference: '{lc.group()}'" if lc else "No non-large-cap references",
         regulatory_basis="AgentManifest.stocks"))
@@ -121,7 +121,7 @@ def oracle_bonds(payload):
     low = a.lower()
     m = get_manifest("bonds")
     out = [_forbidden(
-        a, _SUBIG, "Investment grade only: minimum credit rating BBB+ (S&P) or Baa1 (Moody's)",
+        a, _SUBIG, "Investment grade only: minimum credit rating BBB+ (S&P) or Baa1 (Moody's); BB, B, CCC, CC, C, junk or high-yield debt is not permitted",
         "MANIFEST_BONDS_IG_ONLY", "Found sub-investment-grade reference: '{t}'",
         "No sub-investment-grade references", "AgentManifest.bonds", False)]
     dm = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", a, re.IGNORECASE)
@@ -157,7 +157,7 @@ def oracle_materials(payload):
     low = a.lower()
     m = get_manifest("materials")
     out = [_forbidden(
-        a, _COMM, "Direct exposure permitted for Gold and Silver only",
+        a, _COMM, "Direct exposure permitted for Gold and Silver only; oil, crude, natural gas, copper, platinum, palladium, wheat, corn, soybeans or crypto assets are not permitted",
         "MANIFEST_MATERIALS_APPROVED", "Found non-approved commodity: '{t}'",
         "Only approved commodities referenced", "AgentManifest.materials", True)]
     over = [p for p in _extract_percentages(a) if p > m.risk_parameters["max_total_allocation"]]

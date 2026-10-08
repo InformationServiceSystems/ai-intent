@@ -29,25 +29,17 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ## 2. Ontological track
 
-### 2.1 Mandate modeling with Object-Role Modeling (ORM)
+### 2.1 Constraints as a single source, by the ORM principle
 
-**Status:** planned. **Motivation:** the paper's most important limitation is specification-to-predicate consistency. Each boundary constraint is a triple of text, predicate and deontic type, but text and predicate are authored separately and nothing checks that they agree. A cap written as "15%" in the text and coded as `> 0.20` in the predicate is enforced silently, and the containment metric cannot detect it because no rule fires.
+**Status:** done 8 October 2026 (`agents/constraint_spec.py`). **Motivation:** the paper's most important limitation was specification-to-predicate consistency: text and predicate of a boundary constraint were authored separately, so a miscoded predicate was enforced silently. A deterministic check (`evaluation/spec_consistency.py`, C1 to C4) located the actual divergences on 8 October 2026: three bond texts had drifted between manifest and registry, and two predicates were term-list proxies of their text.
 
-ORM addresses this at design time, with three properties the current encoding lacks:
+**What was done.** Each boundary constraint is now one `ConstraintSpec` (template, formal content, deontic type). From it are generated the manifest text the agent sees, the predicate the gate evaluates and the registry entry the gate cites; every number is read from the agent's risk parameters. Text and predicate therefore cannot diverge, and the two proxy predicates now say in their text which terms they forbid. This is the Object-Role Modeling principle, verbalising a constraint from its formal form, applied with a 200-line Python module instead of the ORM tooling.
 
-- **Single source for text and predicate.** ORM tools verbalize every constraint in controlled natural language from the formal constraint. The sentence that goes into the agent's system prompt is then derived from the constraint the gate evaluates, not written beside it.
-- **Deontic modality is built in.** ORM 2 distinguishes alethic constraints, which a population cannot violate, from deontic constraints, which it can and which are verbalized as "It is forbidden that" or "It is obligatory that". This is the deontic type τ ∈ {F, O} of the triple, with the same semantics the Compliance Agent applies: a deontic constraint is checkable but violable, and a violation is recorded.
-- **Value, subset and exclusion constraints with formal semantics.** "allocation ≤ 0.15", "commodity ∈ {Gold, Silver}", "rating ≥ BBB+" become first-class constraints on fact types, replacing regular expressions over prose.
+**Why not full ORM here.** Fourteen constraints in four mandates, written and reviewed by developers, do not justify a modelling tool chain (NORMA requires Visual Studio on Windows) whose verbalisations nobody outside the team would read. Full ORM becomes worthwhile when mandates are authored by compliance staff who review the verbalisations, or when dozens of mandates with cross-references exist. The paper cites ORM as the source of the principle.
 
-**Scope:**
+**What remains.** The two proxies are still term lists over prose. Replacing them by a set constraint (`commodity ∈ approved_commodities`) and a threshold constraint (`market_cap > max_market_cap_threshold`) requires structured agent outputs (1.2). Once those exist, `ConstraintSpec` gains the kinds `in_set` and `min_threshold` and the proxies disappear.
 
-- Model the content of each Mandate as an ORM schema: fact types over the structured output fields of 1.2 (Proposed Action recommends allocation of Value to AssetClass; Proposed Action names Commodity; …) with value constraints bound to the Mandate's risk parameters and deontic modality per constraint.
-- Treat each Proposed Action as a candidate population of that schema. The predicate φᵢ is the violation check of constraint i against that population; the Compliance Agent becomes an ORM constraint checker over a single-action population.
-- Generate `text`ᵢ by ORM verbalization and use it in `manifest_to_system_prompt()`. Keep a provenance field on each `BoundaryConstraint` that records the ORM constraint it was generated from.
-- Keep OntoUML for the governance metamodel (Principal, Agent, Mandate, Proposed Action, Intent Enforcement, Compliance Verdict, Log Entry, Accountability Trace). ORM models the content of a Mandate, OntoUML the relationships between governance constructs; the paper must justify the two notations by this division of labour.
-- Evaluate by construction: show that the miscoding class of Limitation 2 (text and predicate disagree) cannot arise when text is derived from the constraint, and measure the false-positive rate of the term checks before and after replacing them with value constraints.
-
-*Depends on* 1.2. Tooling candidates: NORMA for modeling and verbalization; SBVR as the verbalization standard closest to regulatory text (MiFID II) if the verbalizations are to be reviewed by compliance staff.
+*Depends on* 1.2 for the last step. *Enables* 2.2.
 
 ### 2.2 Design-time consistency checks over the OntoUML model
 
