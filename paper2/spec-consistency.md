@@ -41,3 +41,7 @@ Roadmap item 2.1 was rewritten accordingly: the ORM principle is applied, the OR
 ## Update, 8 October 2026, evening: structured outputs (ROADMAP 1.2)
 
 The equities agent now returns `positions` with `market_cap_usd`, the commodities agent `commodities` with names. The large-cap rule is a threshold constraint (`min`) over the capitalisation against `max_market_cap_threshold`, the approved-commodities rule a set constraint (`in_set`) over the names against `approved_commodities`. The term lists remain as prose fallback when a field is absent, reproducing the earlier behaviour exactly. Lithium now fails the set constraint and a $4 billion company fails the threshold, whatever the prose says. Credit ratings, durations and ESG remain prose-evaluated; the mechanism to retire them is in place.
+
+## Update, 8 October 2026, night: all constraints structured-first
+
+Every boundary constraint now has a typed field: holdings with rating, maturity, allocation and region plus a portfolio duration for bonds; instrument and ESG assessment on positions; instrument on commodities and a top-level inflation rationale; allocation per asset class in the synthesis. Predicate kinds: `max_threshold` (also summed per group, e.g. per maturity year), `min_threshold` (numbers and an ordinal credit-rating scale), `in_set`, `not_in_set`, `required_field`. The prose mechanisms are retained only as fallback and reproduce the earlier detail strings; 45 tests cover both paths.

@@ -20,6 +20,7 @@ from agents.manifests import (
 )
 from agents.regulatory_rules import (
     BoundaryConstraint,
+    Predicate,
     RegulatoryRule,
     get_boundary_constraints_for_agent,
     get_rules_for_agent,
@@ -181,7 +182,7 @@ def _coerce_allocations(raw: Any) -> list[float] | None:
 
 
 def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
-    """Normalise a structured list field (positions, commodities) to a list of dicts, or None if unusable."""
+    """Normalise a structured list field (positions, holdings, commodities) to a list of dicts, or None if unusable."""
     if not isinstance(raw, list) or not raw:
         return None
     items: list[dict[str, Any]] = []
@@ -194,13 +195,15 @@ def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
 
 
 def _as_number(raw: Any) -> float | None:
-    """Parse a number that a model may have written as 2.8e12, '2800000000000', '$2.8 trillion' or '250 billion'."""
+    """Parse a number that a model may have written as 2.8e12, '2800000000000', '$2.8 trillion', '250 billion' or '12%'."""
+    if isinstance(raw, bool):
+        return None
     if isinstance(raw, (int, float)):
         return float(raw)
     if not isinstance(raw, str):
         return None
     txt = raw.lower().replace(",", "").replace("$", "").strip()
-    m = re.match(r"([\d.]+)\s*(trillion|billion|million|t|b|m|bn)?", txt)
+    m = re.match(r"([\d.]+)\s*(trillion|billion|million|years?|yrs?|t|b|m|bn|%)?", txt)
     if not m:
         return None
     try:
@@ -211,81 +214,172 @@ def _as_number(raw: Any) -> float | None:
     return value * scale
 
 
+# Ordinal credit-rating scale, best first; S&P/Fitch and Moody's notations interleaved.
+_RATING_ORDER = [
+    ("AAA", "Aaa"), ("AA+", "Aa1"), ("AA", "Aa2"), ("AA-", "Aa3"), ("A+", "A1"), ("A", "A2"), ("A-", "A3"),
+    ("BBB+", "Baa1"), ("BBB", "Baa2"), ("BBB-", "Baa3"), ("BB+", "Ba1"), ("BB", "Ba2"), ("BB-", "Ba3"),
+    ("B+", "B1"), ("B", "B2"), ("B-", "B3"), ("CCC+", "Caa1"), ("CCC", "Caa2"), ("CCC-", "Caa3"), ("CC", "Ca"), ("C", "C"), ("D", "D"),
+]
+_RATING_RANK: dict[str, int] = {}
+for _i, _pair in enumerate(_RATING_ORDER):
+    for _r in _pair:
+        _RATING_RANK[_r] = len(_RATING_ORDER) - _i
+
+
+def _rating_rank(raw: Any) -> float | None:
+    """Return the ordinal rank of a credit rating (higher is better), or None if unrecognised."""
+    if not isinstance(raw, str):
+        return None
+    token = raw.strip().split()[0] if raw.strip() else ""
+    return float(_RATING_RANK[token]) if token in _RATING_RANK else None
+
+
+def _fraction(value: float) -> float:
+    """Interpret values above 1 as percentages, as the small model does not reliably emit decimals."""
+    return value / 100.0 if value > 1.0 else value
+
+
+def _structured_values(payload: dict[str, Any], p: Predicate, manifest: AgentManifest) -> list[tuple[str, float]] | None:
+    """Read the numeric values a threshold predicate compares, from the typed field; None if the field is unusable."""
+    raw = payload.get(p.structured_field) if p.structured_field else None
+    if raw is None:
+        return None
+    to_num = _rating_rank if p.value_scale == "credit_rating" else _as_number
+    if isinstance(raw, dict):
+        out = [(str(k), _as_number(v)) for k, v in raw.items()]
+        return [(k, _fraction(v) if p.extract == "percent" else v) for k, v in out if v is not None] or None
+    if isinstance(raw, list):
+        items = _structured_items(raw)
+        if items is None:
+            return None
+        if p.group_key:
+            sums: dict[str, float] = {}
+            for item in items:
+                v = _as_number(item.get(p.item_key))
+                if v is not None:
+                    key = str(item.get(p.group_key, "?"))
+                    sums[key] = sums.get(key, 0.0) + (_fraction(v) if p.extract == "percent" else v)
+            return list(sums.items()) or None
+        out = []
+        for item in items:
+            v = to_num(item.get(p.item_key))
+            if v is not None:
+                out.append((str(item.get("name", item.get(p.item_key, "?"))), _fraction(v) if p.extract == "percent" else v))
+        return out or None
+    v = _as_number(raw)
+    return [(p.structured_field, v)] if v is not None else None
+
+
 def _evaluate_boundary_constraint(
     bc: BoundaryConstraint,
     payload: dict[str, Any],
     manifest: AgentManifest,
 ) -> RuleResult:
-    """Evaluate one ⟨text, φ, τ⟩ boundary constraint into a RuleResult.
+    """Evaluate one <text, phi, tau> boundary constraint into a RuleResult.
 
-    Computes whether the predicate φ is satisfied, then applies the deontic
-    type τ: a prohibition (F) passes iff φ is NOT satisfied; an obligation (O)
-    passes iff φ IS satisfied.
-
-    For percentage max_thresholds, φ reads the structured `proposed_allocation`
-    field directly when present, falling back to prose extraction otherwise, so
-    behavior is identical when no structured allocations are supplied.
+    Every predicate kind reads its typed field first (positions, holdings, commodities,
+    portfolio_duration_years, inflation_rationale, allocation_by_asset_class) and falls
+    back to the prose mechanism of the earlier implementation when the field is absent,
+    with the same detail strings, so behaviour on prose-only payloads is unchanged.
     """
     p = bc.predicate
     text = str(payload.get(p.source_field, ""))
+    phi_satisfied: bool
+    detail: str
 
     if p.kind == "max_threshold":
         bound = manifest.risk_parameters[p.risk_param_key]
-        if p.extract == "duration_years":
+        values = _structured_values(payload, p, manifest) if p.structured_field else None
+        if values is not None:
+            over = [(k, v) for k, v in values if v > bound]
+            shown = [f"{k}: {v*100:.1f}%" if p.extract == "percent" else f"{k}: {v:g}" for k, v in over]
+            detail = f"{p.exceed_label} exceeding limit (structured): {shown}" if over else "All within limit (structured)"
+            phi_satisfied = len(over) > 0
+        elif p.extract == "duration_years":
             matches = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", text, re.IGNORECASE)
-            over = [float(d) for d in matches if float(d) > bound]
-            detail = f"{p.exceed_label} exceeding limit: {over}" if over else "All within limit"
+            over_d = [float(d) for d in matches if float(d) > bound]
+            detail = f"{p.exceed_label} exceeding limit: {over_d}" if over_d else "All within limit"
+            phi_satisfied = len(over_d) > 0
         else:  # percent
             structured = _coerce_allocations(payload.get("proposed_allocation"))
-            values = structured if structured is not None else _extract_percentages(text)
-            over = [v for v in values if v > bound]
+            nums = structured if structured is not None else _extract_percentages(text)
+            over_p = [v for v in nums if v > bound]
             detail = (
-                f"{p.exceed_label} exceeding limit: {[f'{v*100:.1f}%' for v in over]}"
-                if over else "All within limit"
+                f"{p.exceed_label} exceeding limit: {[f'{v*100:.1f}%' for v in over_p]}"
+                if over_p else "All within limit"
             )
-        phi_satisfied = len(over) > 0
+            phi_satisfied = len(over_p) > 0
 
-    elif p.kind in ("forbidden_term", "in_set", "min_threshold"):
-        structured = _structured_items(payload.get(p.structured_field)) if p.structured_field else None
-        if p.kind == "in_set" and structured is not None:
-            allowed = [str(a).lower() for a in manifest.risk_parameters.get(p.set_param_key, [])]
-            names = [str(item.get(p.item_key, "")).strip() for item in structured]
-            outside = [n for n in names if n and not any(a in n.lower() for a in allowed)]
-            phi_satisfied = len(outside) > 0
-            detail = (
-                f"Non-approved commodity in structured output: {outside}" if outside
-                else f"All structured commodities approved: {names}"
-            )
-        elif p.kind == "min_threshold" and structured is not None:
-            bound = float(manifest.risk_parameters[p.risk_param_key])
-            below = []
-            for item in structured:
-                value = _as_number(item.get(p.item_key))
-                if value is not None and value < bound:
-                    below.append(f"{item.get('name', '?')} (${value / 1e9:.1f}B)")
-            phi_satisfied = len(below) > 0
-            detail = (
-                f"{p.exceed_label}: {below}" if below
-                else f"All structured positions at or above the market-cap floor (${bound / 1e9:g}B)"
-            )
+    elif p.kind == "min_threshold" and _structured_values(payload, p, manifest) is not None:
+        values = _structured_values(payload, p, manifest)
+        raw_bound = manifest.risk_parameters[p.risk_param_key]
+        bound = _rating_rank(raw_bound) if p.value_scale == "credit_rating" else float(raw_bound)
+        below = [k for k, v in values if bound is not None and v < bound]
+        if p.value_scale == "credit_rating":
+            detail = f"{p.exceed_label} ({raw_bound}): {below}" if below else f"All structured holdings rated {raw_bound} or better"
         else:
-            # Prose fallback: the term list, exactly as before structured fields existed.
-            rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
-            hay = text.lower() if p.on_lower else text
-            m = rx.search(hay)
-            if m is None:
-                phi_satisfied = False
-                detail = p.clean_template
-            elif p.negation_aware and _is_refusal_context(hay, m):
-                phi_satisfied = False
-                detail = p.negation_template.format(term=m.group())
-            else:
-                phi_satisfied = True
-                detail = p.found_template.format(term=m.group())
+            shown = [f"{k} (${v / 1e9:.1f}B)" for k, v in values if v < bound]
+            detail = f"{p.exceed_label}: {shown}" if below else f"All structured positions at or above the market-cap floor (${bound / 1e9:g}B)"
+        phi_satisfied = len(below) > 0
 
-    else:  # required_term
+    elif p.kind == "in_set" and _structured_items(payload.get(p.structured_field)) is not None:
+        items = _structured_items(payload.get(p.structured_field))
+        allowed = [str(a).lower() for a in manifest.risk_parameters.get(p.set_param_key, [])]
+        names = [str(item.get(p.item_key, "")).strip() for item in items]
+        outside = [n for n in names if n and not any(a in n.lower() for a in allowed)]
+        phi_satisfied = len(outside) > 0
+        detail = f"Non-approved commodity in structured output: {outside}" if outside else f"All structured commodities approved: {names}"
+
+    elif p.kind == "not_in_set" and _structured_items(payload.get(p.structured_field)) is not None:
+        items = _structured_items(payload.get(p.structured_field))
+        hits = []
+        for item in items:
+            value = str(item.get(p.item_key, "")).lower()
+            if any(f in value for f in p.forbidden_values or []):
+                hits.append(f"{item.get('name', '?')}: {item.get(p.item_key)}")
+        phi_satisfied = len(hits) > 0
+        detail = f"Forbidden value in structured output: {hits}" if hits else "No forbidden values in structured output"
+
+    elif p.kind == "required_field" and payload.get(p.structured_field) not in (None, "", [], {}):
+        raw = payload.get(p.structured_field)
+        if isinstance(raw, list):
+            items = _structured_items(raw) or []
+            if p.item_key:
+                values = [item.get(p.item_key) for item in items]
+                present = [v for v in values if v not in (None, "", [], {})]
+                if p.min_items > 1:
+                    phi_satisfied = len({str(v) for v in present}) >= p.min_items
+                    detail = (f"{len({str(v) for v in present})} distinct {p.item_key} values (structured)"
+                              if phi_satisfied else f"Fewer than {p.min_items} distinct {p.item_key} values (structured)")
+                else:
+                    phi_satisfied = bool(items) and len(present) == len(items)
+                    detail = (f"{p.item_key} present for every item (structured)" if phi_satisfied
+                              else f"{p.item_key} missing for {len(items) - len(present)} of {len(items)} items (structured)")
+            else:
+                phi_satisfied = len(items) >= p.min_items
+                detail = f"{len(items)} items (structured)"
+        else:
+            phi_satisfied = bool(str(raw).strip())
+            detail = f"{p.structured_field} present (structured)" if phi_satisfied else f"{p.structured_field} empty (structured)"
+
+    elif p.kind in ("forbidden_term", "in_set", "not_in_set", "min_threshold"):
+        # Prose fallback: the term list, exactly as before typed fields existed.
+        rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
+        hay = text.lower() if p.on_lower else text
+        m = rx.search(hay)
+        if m is None:
+            phi_satisfied = False
+            detail = p.clean_template
+        elif p.negation_aware and _is_refusal_context(hay, m):
+            phi_satisfied = False
+            detail = p.negation_template.format(term=m.group())
+        else:
+            phi_satisfied = True
+            detail = p.found_template.format(term=m.group())
+
+    else:  # required_term, or required_field without the typed field
         low = text.lower()
-        phi_satisfied = any(term in low for term in p.synonyms)
+        phi_satisfied = any(term in low for term in (p.synonyms or []))
         detail = p.present_template if phi_satisfied else p.absent_template
 
     passed = (not phi_satisfied) if bc.deontic_type == "F" else phi_satisfied

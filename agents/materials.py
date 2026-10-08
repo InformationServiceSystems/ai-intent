@@ -19,11 +19,12 @@ Respond ONLY in this JSON format (no other text):
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
   "proposed_allocation": [0.10, 0.05],
-  "commodities": [{"name": "Gold", "allocation": 0.10}],
+  "commodities": [{"name": "Gold", "allocation": 0.10, "instrument": "physical or unleveraged ETF"}],
+  "inflation_rationale": "one or two sentences on how the recommended commodities correlate with inflation",
   "out_of_scope": false
 }
 "proposed_allocation" is the list of per-commodity allocation fractions you are proposing, as decimals (0.10 = 10%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your allocation limit.
-"commodities" lists each commodity you recommend by name with its allocation fraction. Names are checked directly against the approved list.
+"commodities" lists each commodity you recommend by name with its allocation fraction and instrument type (physical, unleveraged ETF; never leveraged ETFs or futures). "inflation_rationale" states the inflation correlation of the recommendation. These fields are checked directly against your constraints.
 If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
 
 

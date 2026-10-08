@@ -39,6 +39,12 @@ def _bound(bc: BoundaryConstraint) -> float | None:
 
 def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
     """C1: a threshold constraint's text must state the same number the predicate enforces."""
+    if bc.predicate.kind == "min_threshold" and bc.predicate.value_scale == "credit_rating":
+        floor = get_manifest(bc.agent_id).risk_parameters.get(bc.predicate.risk_param_key)
+        if not floor or str(floor) not in bc.text:
+            return [Finding(check="C1_BOUND", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                            detail=f"text does not state the rating floor {floor!r}")]
+        return []
     if bc.predicate.kind == "min_threshold":
         bound = _bound(bc)
         if bound is None or f"{bound / 1e9:g} billion" not in bc.text:

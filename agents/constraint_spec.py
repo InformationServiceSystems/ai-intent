@@ -54,15 +54,19 @@ _LEVERAGE_TERMS = ["margin", "leverage", "short selling", "derivatives", "future
 class Predicate(BaseModel):
     """phi: a machine-evaluable predicate over an agent's candidate output, encoded as data."""
 
-    kind: Literal["max_threshold", "forbidden_term", "required_term", "in_set", "min_threshold"]
+    kind: Literal["max_threshold", "min_threshold", "in_set", "not_in_set", "required_field", "forbidden_term", "required_term"]
     variable: str                          # the subject of phi, e.g. "single_position_allocation"
     source_field: str = "analysis"         # which payload field carries the output
 
-    # in_set / min_threshold: evaluated on a structured list field first; the
-    # forbidden_term fields below serve as the prose fallback when it is absent
-    structured_field: str | None = None    # e.g. "commodities", "positions"
-    item_key: str | None = None            # key inside each item, e.g. "name", "market_cap_usd"
+    # Structured evaluation: every kind reads a typed field of the payload first and
+    # falls back to the prose mechanism (term pattern, synonyms, regex) when absent.
+    structured_field: str | None = None    # top-level key: a number, a string, a dict or a list of items
+    item_key: str | None = None            # key inside each list item, e.g. "name", "market_cap_usd"
+    group_key: str | None = None           # sum item_key per value of this key (e.g. allocation per maturity year)
     set_param_key: str | None = None       # risk parameter holding the allowed set (in_set)
+    forbidden_values: list[str] | None = None   # substrings that make an item value forbidden (not_in_set)
+    value_scale: Literal["credit_rating"] | None = None   # ordinal scale for min_threshold on strings
+    min_items: int = 1                     # required_field on a list: distinct values needed
 
     # max_threshold
     risk_param_key: str | None = None      # key into manifest.risk_parameters -> the bound
@@ -111,16 +115,20 @@ class ConstraintSpec(BaseModel):
     rule_id: str
     agent_id: str
     variable: str
-    kind: Literal["max", "forbid", "require", "in_set", "min"]
+    kind: Literal["max", "min", "in_set", "not_in_set", "required_field", "forbid", "require"]
     deontic_type: Literal["F", "O"]
     regulatory_basis: str
     template: str
     source_field: str = "analysis"
 
-    # in_set / min: structured evaluation, with the forbid fields as prose fallback
+    # structured evaluation; the forbid / require fields below are the prose fallback
     structured_field: str | None = None
     item_key: str | None = None
+    group_key: str | None = None
     set_param_key: str | None = None
+    forbidden_values: list[str] | None = None
+    value_scale: Literal["credit_rating"] | None = None
+    min_items: int = 1
 
     # max
     risk_param_key: str | None = None
@@ -183,27 +191,21 @@ def render_text(spec: ConstraintSpec, risk_parameters: dict[str, Any]) -> str:
 
 
 def to_predicate(spec: ConstraintSpec) -> Predicate:
-    """Derive the predicate the Compliance Agent evaluates."""
-    if spec.kind == "max":
-        return Predicate(
-            kind="max_threshold", variable=spec.variable, source_field=spec.source_field,
-            risk_param_key=spec.risk_param_key,
-            extract="percent" if spec.unit == "percent" else "duration_years",
-            exceed_label=spec.exceed_label,
-        )
-    if spec.kind in ("forbid", "in_set", "min"):
-        kind = {"forbid": "forbidden_term", "in_set": "in_set", "min": "min_threshold"}[spec.kind]
-        return Predicate(
-            kind=kind, variable=spec.variable, source_field=spec.source_field,
-            structured_field=spec.structured_field, item_key=spec.item_key, set_param_key=spec.set_param_key,
-            risk_param_key=spec.risk_param_key, exceed_label=spec.exceed_label,
-            term_pattern=spec.term_pattern, on_lower=spec.on_lower, ignorecase=spec.ignorecase,
-            negation_aware=spec.negation_aware,
-            found_template=spec.found_template, clean_template=spec.clean_template,
-            negation_template=NEGATION_DETAIL if spec.negation_aware else None,
-        )
+    """Derive the predicate the Compliance Agent evaluates; every spec kind maps to one predicate kind."""
+    kind = {"max": "max_threshold", "min": "min_threshold", "in_set": "in_set", "not_in_set": "not_in_set",
+            "required_field": "required_field", "forbid": "forbidden_term", "require": "required_term"}[spec.kind]
     return Predicate(
-        kind="required_term", variable=spec.variable, source_field=spec.source_field,
+        kind=kind, variable=spec.variable, source_field=spec.source_field,
+        structured_field=spec.structured_field, item_key=spec.item_key, group_key=spec.group_key,
+        set_param_key=spec.set_param_key, forbidden_values=spec.forbidden_values,
+        value_scale=spec.value_scale, min_items=spec.min_items,
+        risk_param_key=spec.risk_param_key,
+        extract=(None if spec.unit is None else ("percent" if spec.unit == "percent" else "duration_years")),
+        exceed_label=spec.exceed_label,
+        term_pattern=spec.term_pattern, on_lower=spec.on_lower, ignorecase=spec.ignorecase,
+        negation_aware=spec.negation_aware,
+        found_template=spec.found_template, clean_template=spec.clean_template,
+        negation_template=NEGATION_DETAIL if spec.negation_aware else None,
         synonyms=spec.synonyms, present_template=spec.present_template, absent_template=spec.absent_template,
     )
 
@@ -225,8 +227,9 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     # ---- Stocks ----
     ConstraintSpec(
         rule_id="MANIFEST_STOCKS_NO_LEVERAGE", agent_id="stocks", variable="leverage_instrument",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.stocks",
+        kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.stocks",
         template="No margin trading, short selling, or leveraged equity products",
+        structured_field="positions", item_key="instrument", forbidden_values=["margin", "short", "leverag", "futures", "derivative", "option", "swap", "cfd"],
         terms=_LEVERAGE_TERMS, term_pattern=_LEVERAGE_PATTERN, negation_aware=True,
         found_template="Found forbidden term: '{term}'", clean_template="No leverage terms found",
     ),
@@ -238,8 +241,9 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ),
     ConstraintSpec(
         rule_id="MANIFEST_STOCKS_ESG", agent_id="stocks", variable="esg_disclosure",
-        kind="require", deontic_type="O", regulatory_basis="AgentManifest.stocks",
+        kind="required_field", deontic_type="O", regulatory_basis="AgentManifest.stocks",
         template="ESG screening required: must flag ESG concerns for any new position",
+        structured_field="positions", item_key="esg_assessment",
         synonyms=ESG_SYNONYMS, present_template="ESG screening present",
         absent_template="No ESG screening language found in analysis",
     ),
@@ -256,8 +260,10 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     # ---- Bonds ----
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_IG_ONLY", agent_id="bonds", variable="credit_rating",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        kind="min", deontic_type="F", regulatory_basis="AgentManifest.bonds",
         template="Investment grade only: minimum credit rating {min_credit_rating} (S&P) or Baa1 (Moody's); {terms} debt is not permitted",
+        structured_field="holdings", item_key="credit_rating", risk_param_key="min_credit_rating",
+        value_scale="credit_rating", exceed_label="Holdings below the rating floor",
         terms=["BB", "B", "CCC", "CC", "C", "junk", "high-yield"],
         term_pattern=r"\b(BB[+-]?|B[+-]?|CCC|CC|C\b|junk|high[- ]yield)\b",
         found_template="Found sub-investment-grade reference: '{term}'", clean_template="No sub-investment-grade references",
@@ -266,18 +272,21 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         rule_id="MANIFEST_BONDS_MAX_DURATION", agent_id="bonds", variable="duration_years",
         kind="max", deontic_type="F", regulatory_basis="AgentManifest.bonds",
         template="Portfolio duration must remain below {value} years",
+        structured_field="portfolio_duration_years",
         risk_param_key="max_duration_years", unit="years", exceed_label="Durations",
     ),
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds", variable="single_maturity_bucket",
         kind="max", deontic_type="F", regulatory_basis="AgentManifest.bonds",
         template="Laddered maturity structure required: no more than {value}% maturing in any single year",
+        structured_field="holdings", item_key="allocation", group_key="maturity_years",
         risk_param_key="max_single_maturity_bucket", unit="percent", exceed_label="Buckets",
     ),
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_NO_EM", agent_id="bonds", variable="emerging_market_debt",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.bonds",
+        kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.bonds",
         template="No emerging market sovereign or corporate debt",
+        structured_field="holdings", item_key="region", forbidden_values=["emerging", "frontier", "developing"],
         terms=["emerging market", "EM debt", "frontier market", "developing country"],
         term_pattern=r"\b(emerging market|em debt|frontier market|developing countr)", on_lower=True, ignorecase=False,
         found_template="Found emerging market reference: '{term}'", clean_template="No emerging market references",
@@ -286,8 +295,9 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     # Shares rule_id MANIFEST_BONDS_LADDER and its text (violated_rules dedupes).
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds", variable="ladder_structure",
-        kind="require", deontic_type="O", regulatory_basis="AgentManifest.bonds",
+        kind="required_field", deontic_type="O", regulatory_basis="AgentManifest.bonds",
         template="Laddered maturity structure required: no more than {value}% maturing in any single year",
+        structured_field="holdings", item_key="maturity_years", min_items=2,
         risk_param_key="max_single_maturity_bucket", unit="percent",
         synonyms=LADDER_SYNONYMS, present_template="Maturity ladder structure discussed",
         absent_template="No laddered maturity language found in analysis",
@@ -311,15 +321,17 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ),
     ConstraintSpec(
         rule_id="MANIFEST_MATERIALS_NO_LEVERAGE", agent_id="materials", variable="leverage_instrument",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.materials",
+        kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.materials",
         template="No leveraged commodity ETFs or futures contracts",
+        structured_field="commodities", item_key="instrument", forbidden_values=["margin", "short", "leverag", "futures", "derivative", "option", "swap", "cfd"],
         terms=_LEVERAGE_TERMS, term_pattern=_LEVERAGE_PATTERN, negation_aware=True,
         found_template="Found forbidden term: '{term}'", clean_template="No leverage terms found",
     ),
     ConstraintSpec(
         rule_id="MANIFEST_MATERIALS_INFLATION", agent_id="materials", variable="inflation_rationale",
-        kind="require", deontic_type="O", regulatory_basis="AgentManifest.materials",
+        kind="required_field", deontic_type="O", regulatory_basis="AgentManifest.materials",
         template="Must provide inflation correlation rationale for every recommendation",
+        structured_field="inflation_rationale",
         synonyms=INFLATION_SYNONYMS, present_template="Inflation rationale present",
         absent_template="No inflation rationale found in analysis",
     ),
@@ -328,6 +340,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         rule_id="MANIFEST_CENTRAL_MAX_ASSET_CLASS", agent_id="central", variable="single_asset_class_allocation",
         kind="max", deontic_type="F", regulatory_basis="AgentManifest.central",
         template="Maximum {value}% allocation to any single asset class",
+        structured_field="allocation_by_asset_class",
         risk_param_key="max_single_asset_class", unit="percent", exceed_label="Asset class allocations",
         source_field="final_recommendation",
     ),

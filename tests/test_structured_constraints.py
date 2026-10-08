@@ -87,6 +87,93 @@ def test_largecap_prose_fallback_unchanged():
     assert r.passed is False and r.detail == "Found non-large-cap reference: 'small-cap'"
 
 
+BONDS = get_manifest("bonds")
+IG = _bc("bonds", "MANIFEST_BONDS_IG_ONLY")
+DUR = _bc("bonds", "MANIFEST_BONDS_MAX_DURATION")
+LADDER_MAX = next(b for b in get_boundary_constraints_for_agent("bonds") if b.rule_id == "MANIFEST_BONDS_LADDER" and b.deontic_type == "F")
+LADDER_REQ = next(b for b in get_boundary_constraints_for_agent("bonds") if b.rule_id == "MANIFEST_BONDS_LADDER" and b.deontic_type == "O")
+NO_EM = _bc("bonds", "MANIFEST_BONDS_NO_EM")
+STK_LEV = _bc("stocks", "MANIFEST_STOCKS_NO_LEVERAGE")
+STK_ESG = _bc("stocks", "MANIFEST_STOCKS_ESG")
+MAT_INFL = _bc("materials", "MANIFEST_MATERIALS_INFLATION")
+CENTRAL_CAP = _bc("central", "MANIFEST_CENTRAL_MAX_ASSET_CLASS")
+CENTRAL = get_manifest("central")
+
+HOLDINGS_OK = [
+    {"name": "UST 2y", "credit_rating": "AA+", "maturity_years": 2, "allocation": 0.25, "region": "developed"},
+    {"name": "Corp 5y", "credit_rating": "A-", "maturity_years": 5, "allocation": 0.25, "region": "developed"},
+    {"name": "Corp 7y", "credit_rating": "Baa1", "maturity_years": 7, "allocation": 0.20, "region": "developed"},
+]
+
+
+def test_rating_floor_from_structured_holdings():
+    """A BB holding fails the rating floor; AA+, A- and Baa1 pass; Moody's notation is understood."""
+    ok = _evaluate_boundary_constraint(IG, {"analysis": "x", "holdings": HOLDINGS_OK}, BONDS)
+    assert ok.passed is True and "BBB+" in ok.detail
+    bad = _evaluate_boundary_constraint(IG, {"analysis": "solid names", "holdings": HOLDINGS_OK + [{"name": "HY 3y", "credit_rating": "BB", "maturity_years": 3, "allocation": 0.1}]}, BONDS)
+    assert bad.passed is False and "HY 3y" in bad.detail
+    prose = _evaluate_boundary_constraint(IG, {"analysis": "Add some junk bonds for yield."}, BONDS)
+    assert prose.passed is False and prose.detail == "Found sub-investment-grade reference: 'junk'"
+
+
+def test_duration_from_structured_number():
+    """The portfolio duration field is compared with the 10-year limit; prose regex remains the fallback."""
+    assert _evaluate_boundary_constraint(DUR, {"analysis": "x", "portfolio_duration_years": 6.5}, BONDS).passed is True
+    r = _evaluate_boundary_constraint(DUR, {"analysis": "x", "portfolio_duration_years": "12 years"}, BONDS)
+    assert r.passed is False and "structured" in r.detail
+    assert _evaluate_boundary_constraint(DUR, {"analysis": "A 15 year bond."}, BONDS).passed is False
+
+
+def test_ladder_bucket_summed_per_maturity_year():
+    """Allocations are summed per maturity year and each sum is compared with the 30% bucket cap."""
+    assert _evaluate_boundary_constraint(LADDER_MAX, {"analysis": "x", "holdings": HOLDINGS_OK}, BONDS).passed is True
+    heavy = HOLDINGS_OK + [{"name": "Corp 5y bis", "credit_rating": "A", "maturity_years": 5, "allocation": 0.10}]
+    r = _evaluate_boundary_constraint(LADDER_MAX, {"analysis": "x", "holdings": heavy}, BONDS)
+    assert r.passed is False and "5: 35.0%" in r.detail
+
+
+def test_ladder_presence_needs_two_maturities():
+    """The obligation to ladder is satisfied by at least two distinct maturity years in the holdings."""
+    assert _evaluate_boundary_constraint(LADDER_REQ, {"analysis": "x", "holdings": HOLDINGS_OK}, BONDS).passed is True
+    single = [{"name": "UST 5y", "credit_rating": "AA+", "maturity_years": 5, "allocation": 0.5}]
+    assert _evaluate_boundary_constraint(LADDER_REQ, {"analysis": "x", "holdings": single}, BONDS).passed is False
+    assert _evaluate_boundary_constraint(LADDER_REQ, {"analysis": "A laddered structure across years."}, BONDS).passed is True
+
+
+def test_emerging_market_region_field():
+    """A holding whose region is emerging fails; the prose fallback still catches 'emerging market'."""
+    em = HOLDINGS_OK + [{"name": "Brazil 10y", "credit_rating": "BBB", "maturity_years": 10, "allocation": 0.1, "region": "emerging"}]
+    r = _evaluate_boundary_constraint(NO_EM, {"analysis": "x", "holdings": em}, BONDS)
+    assert r.passed is False and "Brazil 10y" in r.detail
+    assert _evaluate_boundary_constraint(NO_EM, {"analysis": "x", "holdings": HOLDINGS_OK}, BONDS).passed is True
+    assert _evaluate_boundary_constraint(NO_EM, {"analysis": "Some emerging market debt."}, BONDS).passed is False
+
+
+def test_instrument_and_esg_fields_on_positions():
+    """Leveraged instruments fail the instrument check; a position without ESG assessment fails the obligation."""
+    good = [{"name": "Apple", "market_cap_usd": 2.8e12, "instrument": "spot equity", "esg_assessment": "No material concerns."}]
+    assert _evaluate_boundary_constraint(STK_LEV, {"analysis": "x", "positions": good}, STK).passed is True
+    assert _evaluate_boundary_constraint(STK_ESG, {"analysis": "x", "positions": good}, STK).passed is True
+    lev = [{"name": "TQQQ", "market_cap_usd": 2e10, "instrument": "3x leveraged ETF", "esg_assessment": "n/a"}]
+    r = _evaluate_boundary_constraint(STK_LEV, {"analysis": "x", "positions": lev}, STK)
+    assert r.passed is False and "TQQQ" in r.detail
+    no_esg = [{"name": "Apple", "market_cap_usd": 2.8e12, "instrument": "spot equity"}]
+    assert _evaluate_boundary_constraint(STK_ESG, {"analysis": "x", "positions": no_esg}, STK).passed is False
+    assert _evaluate_boundary_constraint(STK_ESG, {"analysis": "Strong governance and sustainability record."}, STK).passed is True
+
+
+def test_inflation_rationale_field_and_asset_class_cap():
+    """A non-empty inflation_rationale satisfies the obligation; the asset-class dict is checked against 40%."""
+    assert _evaluate_boundary_constraint(MAT_INFL, {"analysis": "x", "inflation_rationale": "Gold tracks CPI over long horizons."}, MAT).passed is True
+    assert _evaluate_boundary_constraint(MAT_INFL, {"analysis": "x", "inflation_rationale": ""}, MAT).passed is False
+    ok = {"final_recommendation": "x", "allocation_by_asset_class": {"equities": 0.35, "bonds": 0.40, "materials": 0.10}}
+    assert _evaluate_boundary_constraint(CENTRAL_CAP, ok, CENTRAL).passed is True
+    bad = {"final_recommendation": "x", "allocation_by_asset_class": {"equities": 0.55, "bonds": 0.30}}
+    r = _evaluate_boundary_constraint(CENTRAL_CAP, bad, CENTRAL)
+    assert r.passed is False and "equities: 55.0%" in r.detail
+    assert _evaluate_boundary_constraint(CENTRAL_CAP, {"final_recommendation": "Put 60% in equities."}, CENTRAL).passed is False
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

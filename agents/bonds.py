@@ -19,9 +19,12 @@ Respond ONLY in this JSON format (no other text):
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
   "proposed_allocation": [0.25, 0.20],
+  "holdings": [{"name": "US Treasury 5y", "credit_rating": "AA+", "maturity_years": 5, "allocation": 0.25, "region": "developed"}],
+  "portfolio_duration_years": 6.5,
   "out_of_scope": false
 }
 "proposed_allocation" is the list of per-maturity-bucket allocation fractions you are proposing, as decimals (0.25 = 25%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your per-year maturity limit.
+"holdings" lists each bond or bucket you recommend with its credit rating (S&P or Moody's notation), maturity in years, allocation fraction and region (developed or emerging). "portfolio_duration_years" is the resulting portfolio duration. These fields are checked directly against your rating floor, duration limit and per-year maturity limit.
 If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
 
 
