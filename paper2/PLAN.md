@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| Accountability tab in the UI | `ui/accountability_panel.py` | chain, breaches, manifestations, Q1 to Q9 per session | done 8 Oct 2026 |
 | OntoUML model, verified and transformed to gUFO | `ontology/ontouml/` (`build_model.js`, `.ontouml.json`, `.gufo.ttl`, `verification.json`), `evaluation/ontouml_alignment.py` | README in `ontology/ontouml/` | done 8 Oct 2026, 0 verification issues, 13/13 constructs aligned |
 | Q9, OWL-RL consistency against gUFO | `evaluation/gufo_consistency.py`, `evaluation/ontology/gufo.ttl` | `paper2/q9-gufo-consistency.md` | done 8 Oct 2026, 0 inconsistent graphs in campaigns 1 and 2 |
 | Third campaign, deterministic routing (10 runs, HPC) | `evaluation/ufo_hpc3_*`, `evaluation/sessions/ufo_hpc3_*` | `paper2/e2-e3-results-run3.md`, `paper2/e2-e3-notes-run3.md` | done 7 Oct 2026, ME 80.0% |
