@@ -22,6 +22,7 @@ from ui.intent_timeline import render_intent_timeline
 from ui.manifest_diff import render_manifest_diff
 from ui.mcp_stream import render_mcp_stream
 from ui.revision_history import render_revision_history
+from ui.accountability_panel import render_accountability_panel
 
 st.set_page_config(
     layout="wide",
@@ -529,8 +530,8 @@ with col2:
     # Display results in tabs
     if result:
         st.divider()
-        results_tab, flow_tab, compliance_tab, compliance_log_tab, violations_tab = st.tabs(
-            ["Results", "Intent Flow", "Compliance", "Compliance Log", "Violations"]
+        results_tab, flow_tab, compliance_tab, compliance_log_tab, violations_tab, accountability_tab = st.tabs(
+            ["Results", "Intent Flow", "Compliance", "Compliance Log", "Violations", "Accountability"]
         )
 
         with results_tab:
@@ -644,6 +645,9 @@ with col2:
 
         with violations_tab:
             render_manifest_diff(active_session)
+
+        with accountability_tab:
+            render_accountability_panel(active_session)
 
 with col3:
     st.subheader("MCP Stream & Constraints")
