@@ -223,7 +223,7 @@ conformist (following another agent out of scope) & out-of-scope recommendation,
 \end{tabularx}
 \end{table}
 
-Attribution is deterministic and reads only the log: after the sub-agent calls complete, the orchestrator scans the session's rejection and block events, applies Definition~\ref{def:manifestation} for every Disposition the agent bears, and records the result as \code{disposition.manifest.\{a\}}. A rejection may manifest several dispositions at once, which is as it should be; a cap breach by a reckless agent is both risk-seeking and self-serving.
+Attribution is deterministic and reads only the log: after the sub-agent calls complete, the orchestrator applies Definition~\ref{def:manifestation} to the session's rejection and block events and records the result as \code{disposition.manifest.\{a\}}. A rejection may manifest several dispositions at once; a cap breach by a reckless agent is both risk-seeking and self-serving.
 
 \paragraph{Disposition Containment restated.}
 With these definitions the ER 2026 metric becomes a statement about dispositions and the gate: the gate \emph{contains} $\delta$ in session $s$ if no manifestation of $\delta$ in $s$ is a delivery. The zero-forced-pass result of ER 2026 is then the statement that no manifestation of any disposition reached delivery; the present paper adds which dispositions were manifested, how often, and in which rules.
@@ -268,7 +268,7 @@ Second, the export reads nothing but the log. Delegations, dispositions and mani
 Third, gUFO has no class for normative descriptions, so the Mandate is typed as \code{gufo:Object}. The typing is weak and we say so; Section~\ref{sec:corrections} discusses it.
 
 \paragraph{Integrity queries.}
-Eight invariants of the framework are stated as SPARQL queries whose result set must be empty (Table~\ref{tab:checks}). Each row returned is a violation with the individuals involved. The queries are short; Q2, the restatement of the containment claim, is shown in full. A ninth check, Q9, is not a query but a reasoning step: the session graph is merged with the gUFO ontology, closed under OWL~RL, and then scanned for individuals that the closure places in two disjoint UFO categories, such as an endurant that is also an event. Q9 is what makes the grounding of Table~\ref{tab:mapping} falsifiable: a verdict typed as a mode of an event, the reading the earlier paper gave, is caught by it, because the domain of \code{inheresIn} forces the bearer to be an endurant and gUFO declares endurants and events disjoint.
+Eight invariants of the framework are stated as SPARQL queries whose result set must be empty (Table~\ref{tab:checks}). Each row returned is a violation with the individuals involved. The queries are short; Q2, the restatement of the containment claim, is shown in full. A ninth check, Q9, is a reasoning step: the graph is merged with the gUFO ontology, closed under OWL~RL, and scanned for individuals placed in two disjoint UFO categories. Q9 makes the grounding of Table~\ref{tab:mapping} falsifiable: a verdict inhering in an event, the earlier paper's reading, is caught, because the domain of \code{inheresIn} makes the bearer an endurant and gUFO declares endurants and events disjoint.
 
 \begin{table}[tb]
 \centering
@@ -336,7 +336,7 @@ Q5 manifestation has bearer & 190/190 \\
 Q6 every action evaluated & 190/190 \\
 Q7 trace complete & 190/190 \\
 Q8 rule in commitment & 190/190 \\
-Q9 gUFO consistent & \todo{Q9} \\
+Q9 gUFO consistent & 190/190 \\
 \bottomrule
 \end{tabular}
 \end{minipage}\hfill
@@ -376,7 +376,7 @@ groupthink & 57 & 2 & 2 & conformist 2 \\
 \end{tabularx}
 \end{table}
 
-\emph{E4.} A session graph has 514 to 2569 triples, 869 on average. Parsing a graph takes 14 ms and running all eight queries 69 ms on average on a laptop, 173 ms at most. Export and verification are therefore practical at the granularity of a session, and well within what an audit of a day's sessions would need.
+\emph{E4.} A session graph has 514 to 2569 triples, 869 on average. Parsing a graph takes 14 ms and running the eight queries 69 ms on average on a laptop, 173 ms at most. The OWL~RL closure of Q9 adds about 6{,}100 triples per session and takes 9.8 s on average, 175 s at most. Export and the queries are therefore practical interactively; the reasoner check belongs in a per-session or nightly batch.
 
 \paragraph{What the invariants found.}
 Q8 states that a rule a verdict names against an agent must belong to that agent's Commitment. In a first campaign it failed twice, and both failures were specification gaps rather than gate failures: five disposition-integrity rules that the Compliance Agent implemented were absent from the registry, and the out-of-scope rule was registered for the three specialists but not for the orchestrator, whose routing it also governs. In both cases the gate enforced a rule no agent had committed to. The earlier evaluation could not see this, because its scorer looked up rule identifiers in verdicts, not in commitments. Both gaps were closed by registering the rules; the campaign reported above is the second, with the registry complete.
