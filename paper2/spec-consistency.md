@@ -45,3 +45,15 @@ The equities agent now returns `positions` with `market_cap_usd`, the commoditie
 ## Update, 8 October 2026, night: all constraints structured-first
 
 Every boundary constraint now has a typed field: holdings with rating, maturity, allocation and region plus a portfolio duration for bonds; instrument and ESG assessment on positions; instrument on commodities and a top-level inflation rationale; allocation per asset class in the synthesis. Predicate kinds: `max_threshold` (also summed per group, e.g. per maturity year), `min_threshold` (numbers and an ordinal credit-rating scale), `in_set`, `not_in_set`, `required_field`. The prose mechanisms are retained only as fallback and reproduce the earlier detail strings; 45 tests cover both paths.
+
+### Dry run with typed fields (8 October 2026, llama3.1:8b, four test cases)
+
+| Agent | Field | Emitted |
+|---|---|---|
+| bonds | `holdings` | 5 of 5 responses |
+| bonds | `portfolio_duration_years` | 5 of 5 |
+| materials | `commodities` | 4 of 5 |
+| materials | `inflation_rationale` | 5 of 5 |
+| stocks | `positions` | 0 of 2 (key present, list empty) |
+
+Of 55 evaluations of manifest constraints, 36 ran on the structured path and 19 on the prose fallback. The fallback is therefore still needed with this model, mostly for the equities agent, whose positions list it leaves empty. All nine integrity checks held on every session. A more capable model, or a response schema enforced by the serving layer, would move the remaining evaluations to the structured path; the gate's behaviour does not depend on which path was taken.
