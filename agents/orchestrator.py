@@ -23,6 +23,7 @@ from agents.stocks import analyze as stocks_analyze
 from agents.bonds import analyze as bonds_analyze
 from agents.materials import analyze as materials_analyze
 from mcp.logger import build_message, get_logger
+from agents.schemas import ROUTING_FORMAT, SYNTHESIS_FORMAT
 from utils.llm import chat, safe_parse_json
 
 _AGENT_FUNCS = {
@@ -410,7 +411,7 @@ async def _route_with_compliance(
     for attempt in range(max_retries + 1):
         routing_prompt = system_prompt + ROUTING_INSTRUCTION
         try:
-            raw_routing = chat(routing_prompt, query)
+            raw_routing = chat(routing_prompt, query, response_format=ROUTING_FORMAT)
             routing = safe_parse_json(raw_routing)
             if not isinstance(routing, dict):
                 raise ValueError("routing output is not a JSON object")
@@ -482,7 +483,7 @@ async def _synthesize_with_compliance(
         synthesis_prompt = system_prompt + _SYNTHESIS_INSTRUCTION.format(session_id=session_id, timestamp=now)
 
         try:
-            raw_synthesis = chat(synthesis_prompt, context)
+            raw_synthesis = chat(synthesis_prompt, context, response_format=SYNTHESIS_FORMAT)
             if not raw_synthesis or not raw_synthesis.strip():
                 raise ValueError("LLM returned empty response")
             synthesis = safe_parse_json(raw_synthesis)

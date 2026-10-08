@@ -188,6 +188,8 @@ def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
     items: list[dict[str, Any]] = []
     for x in raw:
         if isinstance(x, dict):
+            if "example" in str(x.get("name", "")).lower() or x.get("market_cap_usd") == 123456789000:
+                continue  # the prompt's placeholder item was copied instead of replaced
             items.append(x)
         elif isinstance(x, str) and x.strip():
             items.append({"name": x.strip()})

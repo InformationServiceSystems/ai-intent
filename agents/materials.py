@@ -4,6 +4,7 @@ from typing import Any
 
 from agents.manifests import DispositionProfile, MATERIALS_MANIFEST, manifest_to_system_prompt
 from mcp.logger import build_message, get_logger
+from agents.schemas import MATERIALS_FORMAT
 from utils.llm import chat, safe_parse_json
 
 _AGENT_ID = MATERIALS_MANIFEST.agent_id
@@ -19,7 +20,7 @@ Respond ONLY in this JSON format (no other text):
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
   "proposed_allocation": [0.10, 0.05],
-  "commodities": [{"name": "Gold", "allocation": 0.10, "instrument": "physical or unleveraged ETF"}],
+  "commodities": [{"name": "Example commodity (replace)", "allocation": 0.10, "instrument": "physical or unleveraged ETF"}],
   "inflation_rationale": "one or two sentences on how the recommended commodities correlate with inflation",
   "out_of_scope": false
 }
@@ -37,7 +38,7 @@ async def analyze(query: str, session_id: str, disposition: DispositionProfile |
     logger.log(outbound)
 
     try:
-        raw = chat(system_prompt, query)
+        raw = chat(system_prompt, query, response_format=MATERIALS_FORMAT)
         result = safe_parse_json(raw)
     except Exception as e:
         result = {"analysis": f"Error: {e}", "constraint_flags": [], "recommendation": "not_applicable", "confidence": "low", "out_of_scope": False, "error": True}
