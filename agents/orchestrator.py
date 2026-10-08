@@ -13,51 +13,18 @@ from agents.compliance import (
 from agents.delegation import accountability_record, build_delegation_chain, check_chain_containment
 from agents.dispositions import detect_manifestations
 from agents.manifests import (
-    CENTRAL_MANIFEST,
     DispositionProfile,
     confidence_at_or_below,
     get_manifest,
     manifest_to_system_prompt,
 )
-from agents.stocks import analyze as stocks_analyze
-from agents.bonds import analyze as bonds_analyze
-from agents.materials import analyze as materials_analyze
+from agents.specialist import specialist_functions
 from mcp.logger import build_message, get_logger
-from agents.schemas import ROUTING_FORMAT, SYNTHESIS_FORMAT
+from agents.domain import get_domain
 from utils.llm import chat, safe_parse_json
 
-_AGENT_FUNCS = {
-    "stocks": stocks_analyze,
-    "bonds": bonds_analyze,
-    "materials": materials_analyze,
-}
 
-ROUTING_INSTRUCTION = """
 
-You will receive a user investment query. Determine which specialist sub-agents to consult and what specific sub-question to send each one.
-
-Available agents:
-- "stocks": Handles large-cap equity analysis (stocks like AAPL, MSFT, JNJ). Use for equity/stock questions.
-- "bonds": Handles fixed-income/bond analysis (treasuries, corporate bonds, TIPS). Use for bond/fixed-income questions.
-- "materials": Handles commodities (Gold, Silver) and inflation hedging. Use for gold, silver, precious metals, commodities, or inflation hedge questions.
-
-Route to ALL agents that are relevant. For example, a gold inflation hedge query should include "materials". A diversified portfolio query should include all three.
-
-Respond ONLY in this JSON format (no other text):
-{"routing_rationale": "...", "agents_to_call": ["stocks", "bonds", "materials"], "query_for_stocks": "...", "query_for_bonds": "...", "query_for_materials": "..."}
-
-Set query_for_X to null for agents NOT in agents_to_call."""
-
-_SYNTHESIS_INSTRUCTION = """
-
-You are synthesizing results from specialist sub-agents into a final investment recommendation.
-
-IMPORTANT: Your recommendation MUST include specific allocation percentages (e.g., "allocate 10% to gold"). Vague qualitative language like "limited allocation" or "balanced approach" is NOT acceptable and will be rejected by compliance.
-
-You MUST produce a JSON response with exactly these three fields (no other text):
-{{"final_recommendation": "A plain-language investment recommendation with SPECIFIC allocation percentages based on the sub-agent results", "allocation_by_asset_class": {{"equities": 0.35, "bonds": 0.45, "materials": 0.10}}, "accountability_note": "Session: {session_id} | Agents consulted: [list] | Compliance history: [include full compliance history from context — which agents were revised or blocked] | Violations: [list or none] | Blocked: [list or none] | Generated: {timestamp}"}}
-
-"allocation_by_asset_class" gives the fraction of the portfolio per asset class; it is checked directly against the 40% cap on any single asset class. Replace the placeholders with actual values from the context provided. The accountability note MUST include the compliance history showing any revision cycles that occurred."""
 
 
 class OrchestrationResult(BaseModel):
@@ -108,6 +75,8 @@ async def run(
         raise ValueError("Query must be a non-empty string")
 
     dispositions = dispositions or {}
+    domain = get_domain()
+    _AGENT_FUNCS = specialist_functions()
     logger = get_logger()
     compliance = get_compliance_agent()
 
@@ -119,7 +88,7 @@ async def run(
     compliance._max_revisions = round(base_max_revisions * compliance_multiplier)
 
     central_disp = dispositions.get("central")
-    system_prompt = manifest_to_system_prompt(CENTRAL_MANIFEST, central_disp)
+    system_prompt = manifest_to_system_prompt(domain.manifest(domain.orchestrator_id), central_disp)
 
     # Inject disposition system prompt modifier
     if system_prompt_modifier:
@@ -409,9 +378,9 @@ async def _route_with_compliance(
         return routing
 
     for attempt in range(max_retries + 1):
-        routing_prompt = system_prompt + ROUTING_INSTRUCTION
+        routing_prompt = system_prompt + get_domain().routing_instruction
         try:
-            raw_routing = chat(routing_prompt, query, response_format=ROUTING_FORMAT)
+            raw_routing = chat(routing_prompt, query, response_format=get_domain().routing_format)
             routing = safe_parse_json(raw_routing)
             if not isinstance(routing, dict):
                 raise ValueError("routing output is not a JSON object")
@@ -480,10 +449,10 @@ async def _synthesize_with_compliance(
     )
 
     for attempt in range(max_retries + 1):
-        synthesis_prompt = system_prompt + _SYNTHESIS_INSTRUCTION.format(session_id=session_id, timestamp=now)
+        synthesis_prompt = system_prompt + get_domain().synthesis_instruction.format(session_id=session_id, timestamp=now)
 
         try:
-            raw_synthesis = chat(synthesis_prompt, context, response_format=SYNTHESIS_FORMAT)
+            raw_synthesis = chat(synthesis_prompt, context, response_format=get_domain().synthesis_format)
             if not raw_synthesis or not raw_synthesis.strip():
                 raise ValueError("LLM returned empty response")
             synthesis = safe_parse_json(raw_synthesis)

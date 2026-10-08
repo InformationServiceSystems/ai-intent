@@ -78,6 +78,20 @@ Two full campaigns ran on 7 October 2026 (`evaluation/ufo_hpc*_results_*.json`, 
 
 *Depends on* nothing in sections 1 to 4; *relates to* 2.2, which the gUFO export makes concrete.
 
+## 6. Generalisation to other domains
+
+**Status:** steps 1 and 2 done 8 October 2026. The kernel reads a `Domain` object (`agents/domain.py`); the finance domain is the first package (`domains/finance.py`); the three specialist modules are bindings of one generic specialist (`agents/specialist.py`). Behaviour on the finance domain is unchanged (test suite and dry run).
+
+Remaining steps, in order:
+
+- **6.3 Roles instead of names.** The gate and the orchestrator still refer to `central`, `stocks`, `bonds`, `materials` in the routing check, the synthesis check, the disposition-integrity checks and the runner's DC scorer. Replace by roles read from the manifests (`composite` for the synthesis role, `decision_right` for specialists) and by thresholds read from the risk parameters.
+- **6.4 Dispositions over constraint tags.** `MANIFESTATION_MAP` names finance rule ids. Give each `ConstraintSpec` tags (`cap`, `leverage`, `disclosure`, `scope`, `quality_floor`) and map disposition kinds to tags, so attribution is valid in any domain.
+- **6.5 Response schemas from specs.** Derive each specialist's response model from the `structured_field` and `item_key` declarations of its specs, so a domain author writes specifications only.
+- **6.6 Test cases in the domain package**, with scorers reading thresholds from manifests.
+- **6.7 A second domain** as the proof: public procurement (CPV categories, thresholds, lot rules, a boundary object such as mixed supply-and-service contracts), roughly ten specifications, run through the same suite and invariants. This is the empirical core of a third paper (3.3).
+
+Transfer conditions, from the ER 2026 paper: a sortal in-or-out boundary per agent, norms expressible as decidable prohibitions or obligations over fields, session-stable Mandates, and lexicographic priority of compliance over usefulness.
+
 ## Dependency summary
 
 | Item | Depends on | Enables |

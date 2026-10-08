@@ -472,13 +472,8 @@ with col2:
     query = st.text_area("Enter your investment query:", height=100, key="query_input")
 
     st.caption("Or try a sample query:")
-    sample_queries = [
-        "Should I add gold to my portfolio as an inflation hedge?",
-        "What large-cap equities look attractive for a conservative investor?",
-        "How should I structure a bond ladder for the next 5 years?",
-        "Design a diversified portfolio split across all three asset classes.",
-        "Is it appropriate to put 50% of the portfolio into crypto futures?",
-    ]
+    from agents.domain import get_domain
+    sample_queries = get_domain().sample_queries
     for i, sq in enumerate(sample_queries):
         st.button(sq, key=f"sample_{i}", on_click=_select_sample_query, args=(sq,))
 

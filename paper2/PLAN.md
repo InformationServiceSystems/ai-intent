@@ -35,6 +35,7 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Dispositions | `agents/dispositions.py` (constructs section) | `disposition.manifest.{agent}` | implemented, tested |
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
+| Domain package and generic specialist (ROADMAP 6, steps 1 and 2) | `agents/domain.py`, `agents/specialist.py`, `domains/finance.py` | README, ROADMAP 6 | done 8 Oct 2026, behaviour unchanged |
 | Structured outputs for all constraints (ROADMAP 1.2) | `agents/stocks.py`, `agents/materials.py`, `agents/compliance.py`, `agents/constraint_spec.py` | `tests/test_structured_constraints.py` | done 8 Oct 2026 |
 | Constraints as a single source (ConstraintSpec) | `agents/constraint_spec.py`; manifests and registry generated from it | ROADMAP 2.1, `paper2/spec-consistency.md` | done 8 Oct 2026; C1 to C3 hold by construction |
 | Specification-predicate consistency check C1 to C4 | `evaluation/spec_consistency.py`, `tests/test_spec_consistency.py` | `paper2/spec-consistency.md` | done 8 Oct 2026; 2 proxy predicates remain, ORM assessed |

@@ -1,55 +1,5 @@
-"""Raw materials sub-agent for commodities analysis."""
+"""Materials specialist: a thin binding of the generic specialist to the 'materials' manifest of the active domain."""
 
-from typing import Any
+from agents.specialist import make_analyze
 
-from agents.manifests import DispositionProfile, MATERIALS_MANIFEST, manifest_to_system_prompt
-from mcp.logger import build_message, get_logger
-from agents.schemas import MATERIALS_FORMAT
-from utils.llm import chat, safe_parse_json
-
-_AGENT_ID = MATERIALS_MANIFEST.agent_id
-
-_JSON_INSTRUCTION = """
-
-IMPORTANT: Your analysis MUST include an inflation correlation rationale explaining how the recommended commodities serve as an inflation hedge. This is a hard constraint — omitting inflation rationale will cause your response to be rejected.
-
-Respond ONLY in this JSON format (no other text):
-{
-  "analysis": "Your substantive response text — must include inflation correlation rationale",
-  "constraint_flags": ["list any constraints that were relevant or nearly violated"],
-  "recommendation": "buy | hold | sell | not_applicable",
-  "confidence": "high | medium | low",
-  "proposed_allocation": [0.10, 0.05],
-  "commodities": [{"name": "Example commodity (replace)", "allocation": 0.10, "instrument": "physical or unleveraged ETF"}],
-  "inflation_rationale": "one or two sentences on how the recommended commodities correlate with inflation",
-  "out_of_scope": false
-}
-"proposed_allocation" is the list of per-commodity allocation fractions you are proposing, as decimals (0.10 = 10%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your allocation limit.
-"commodities" lists each commodity you recommend by name with its allocation fraction and instrument type (physical, unleveraged ETF; never leveraged ETFs or futures). "inflation_rationale" states the inflation correlation of the recommendation. These fields are checked directly against your constraints.
-If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
-
-
-async def analyze(query: str, session_id: str, disposition: DispositionProfile | None = None) -> dict[str, Any]:
-    """Call the LLM with the materials manifest and log the interaction via MCP."""
-    logger = get_logger()
-    system_prompt = manifest_to_system_prompt(MATERIALS_MANIFEST, disposition) + _JSON_INSTRUCTION
-
-    outbound = build_message(session_id, "outbound", "central", _AGENT_ID, f"{_AGENT_ID}.analyze", {"query": query}, "pending")
-    logger.log(outbound)
-
-    try:
-        raw = chat(system_prompt, query, response_format=MATERIALS_FORMAT)
-        result = safe_parse_json(raw)
-    except Exception as e:
-        result = {"analysis": f"Error: {e}", "constraint_flags": [], "recommendation": "not_applicable", "confidence": "low", "out_of_scope": False, "error": True}
-        inbound = build_message(session_id, "inbound", _AGENT_ID, "central", f"{_AGENT_ID}.result", result, "error")
-        logger.log(inbound)
-        return result
-
-    flags = result.get("constraint_flags", [])
-    out_of_scope = result.get("out_of_scope", False)
-    status = "constraint_violation" if out_of_scope else "ok"
-
-    inbound = build_message(session_id, "inbound", _AGENT_ID, "central", f"{_AGENT_ID}.result", result, status, flags)
-    logger.log(inbound)
-    return result
+analyze = make_analyze("materials")

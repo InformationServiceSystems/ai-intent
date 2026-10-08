@@ -1,55 +1,5 @@
-"""Bond sub-agent for fixed income analysis."""
+"""Bonds specialist: a thin binding of the generic specialist to the 'bonds' manifest of the active domain."""
 
-from typing import Any
+from agents.specialist import make_analyze
 
-from agents.manifests import DispositionProfile, BONDS_MANIFEST, manifest_to_system_prompt
-from mcp.logger import build_message, get_logger
-from agents.schemas import BONDS_FORMAT
-from utils.llm import chat, safe_parse_json
-
-_AGENT_ID = BONDS_MANIFEST.agent_id
-
-_JSON_INSTRUCTION = """
-
-IMPORTANT: Your analysis MUST discuss a laddered maturity structure (how maturities are spread across years). This is a hard constraint — omitting maturity ladder discussion will cause your response to be rejected.
-
-Respond ONLY in this JSON format (no other text):
-{
-  "analysis": "Your substantive response text — must discuss laddered maturity structure",
-  "constraint_flags": ["list any constraints that were relevant or nearly violated"],
-  "recommendation": "buy | hold | sell | not_applicable",
-  "confidence": "high | medium | low",
-  "proposed_allocation": [0.25, 0.20],
-  "holdings": [{"name": "Example bond (replace)", "credit_rating": "AA+", "maturity_years": 5, "allocation": 0.25, "region": "developed"}],
-  "portfolio_duration_years": 6.5,
-  "out_of_scope": false
-}
-"proposed_allocation" is the list of per-maturity-bucket allocation fractions you are proposing, as decimals (0.25 = 25%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your per-year maturity limit.
-"holdings" lists each bond or bucket you recommend with its credit rating (S&P or Moody's notation), maturity in years, allocation fraction and region (developed or emerging). "portfolio_duration_years" is the resulting portfolio duration. These fields are checked directly against your rating floor, duration limit and per-year maturity limit.
-If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
-
-
-async def analyze(query: str, session_id: str, disposition: DispositionProfile | None = None) -> dict[str, Any]:
-    """Call the LLM with the bonds manifest and log the interaction via MCP."""
-    logger = get_logger()
-    system_prompt = manifest_to_system_prompt(BONDS_MANIFEST, disposition) + _JSON_INSTRUCTION
-
-    outbound = build_message(session_id, "outbound", "central", _AGENT_ID, f"{_AGENT_ID}.analyze", {"query": query}, "pending")
-    logger.log(outbound)
-
-    try:
-        raw = chat(system_prompt, query, response_format=BONDS_FORMAT)
-        result = safe_parse_json(raw)
-    except Exception as e:
-        result = {"analysis": f"Error: {e}", "constraint_flags": [], "recommendation": "not_applicable", "confidence": "low", "out_of_scope": False, "error": True}
-        inbound = build_message(session_id, "inbound", _AGENT_ID, "central", f"{_AGENT_ID}.result", result, "error")
-        logger.log(inbound)
-        return result
-
-    flags = result.get("constraint_flags", [])
-    out_of_scope = result.get("out_of_scope", False)
-    status = "constraint_violation" if out_of_scope else "ok"
-
-    inbound = build_message(session_id, "inbound", _AGENT_ID, "central", f"{_AGENT_ID}.result", result, status, flags)
-    logger.log(inbound)
-    return result
+analyze = make_analyze("bonds")
