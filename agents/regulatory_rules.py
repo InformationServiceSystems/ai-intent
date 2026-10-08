@@ -460,7 +460,7 @@ BOUNDARY_CONSTRAINTS: list[BoundaryConstraint] = [
     # ---- Bonds ----
     BoundaryConstraint(
         rule_id="MANIFEST_BONDS_IG_ONLY", agent_id="bonds",
-        text="Investment grade only: minimum credit rating BBB+",
+        text="Investment grade only: minimum credit rating BBB+ (S&P) or Baa1 (Moody's)",
         deontic_type="F", regulatory_basis="AgentManifest.bonds",
         predicate=Predicate(
             kind="forbidden_term", variable="credit_rating",
@@ -481,7 +481,7 @@ BOUNDARY_CONSTRAINTS: list[BoundaryConstraint] = [
     ),
     BoundaryConstraint(
         rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds",
-        text="No more than 30% maturing in any single year",
+        text="Laddered maturity structure required: no more than 30% maturing in any single year",
         deontic_type="F", regulatory_basis="AgentManifest.bonds",
         predicate=Predicate(
             kind="max_threshold", variable="single_maturity_bucket",
@@ -505,7 +505,7 @@ BOUNDARY_CONSTRAINTS: list[BoundaryConstraint] = [
     # Legitimately shares rule_id MANIFEST_BONDS_LADDER (violated_rules dedupes).
     BoundaryConstraint(
         rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds",
-        text="Laddered maturity structure required",
+        text="Laddered maturity structure required: no more than 30% maturing in any single year",
         deontic_type="O", regulatory_basis="AgentManifest.bonds",
         predicate=Predicate(
             kind="required_term", variable="ladder_structure",

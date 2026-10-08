@@ -121,7 +121,7 @@ def oracle_bonds(payload):
     low = a.lower()
     m = get_manifest("bonds")
     out = [_forbidden(
-        a, _SUBIG, "Investment grade only: minimum credit rating BBB+",
+        a, _SUBIG, "Investment grade only: minimum credit rating BBB+ (S&P) or Baa1 (Moody's)",
         "MANIFEST_BONDS_IG_ONLY", "Found sub-investment-grade reference: '{t}'",
         "No sub-investment-grade references", "AgentManifest.bonds", False)]
     dm = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", a, re.IGNORECASE)
@@ -133,7 +133,7 @@ def oracle_bonds(payload):
         regulatory_basis="AgentManifest.bonds"))
     over_b = [p for p in _extract_percentages(a) if p > m.risk_parameters["max_single_maturity_bucket"]]
     out.append(RuleResult(
-        rule="No more than 30% maturing in any single year",
+        rule="Laddered maturity structure required: no more than 30% maturing in any single year",
         rule_id="MANIFEST_BONDS_LADDER", source="deterministic", passed=len(over_b) == 0,
         detail=f"Buckets exceeding limit: {[f'{p*100:.1f}%' for p in over_b]}" if over_b else "All within limit",
         regulatory_basis="AgentManifest.bonds"))
@@ -145,7 +145,7 @@ def oracle_bonds(payload):
         regulatory_basis="AgentManifest.bonds"))
     lad = any(t in low for t in _LADDER)
     out.append(RuleResult(
-        rule="Laddered maturity structure required",
+        rule="Laddered maturity structure required: no more than 30% maturing in any single year",
         rule_id="MANIFEST_BONDS_LADDER", source="deterministic", passed=lad,
         detail="Maturity ladder structure discussed" if lad else "No laddered maturity language found in analysis",
         regulatory_basis="AgentManifest.bonds"))
