@@ -44,7 +44,7 @@ def test_manifest_text_equals_registry_text():
 
 def test_registry_order_and_predicates_follow_specs():
     """The registry has one entry per spec, in spec order, with the predicate kind the spec implies."""
-    kinds = {"max": "max_threshold", "forbid": "forbidden_term", "require": "required_term"}
+    kinds = {"max": "max_threshold", "forbid": "forbidden_term", "require": "required_term", "in_set": "in_set", "min": "min_threshold"}
     for agent_id in ("stocks", "bonds", "materials", "central"):
         specs = specs_for(agent_id)
         bcs = get_boundary_constraints_for_agent(agent_id)
@@ -55,7 +55,7 @@ def test_registry_order_and_predicates_follow_specs():
 def test_forbidden_terms_are_named_in_text():
     """A forbid spec's text names each plain term it forbids (first five characters, case-insensitive)."""
     for spec in CONSTRAINT_SPECS:
-        if spec.kind != "forbid":
+        if not spec.terms:
             continue
         text = to_boundary_constraint(spec, get_manifest(spec.agent_id).risk_parameters).text.lower()
         assert any(t.lower()[:5] in text for t in spec.terms), spec.rule_id

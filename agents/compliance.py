@@ -180,6 +180,37 @@ def _coerce_allocations(raw: Any) -> list[float] | None:
     return out or None
 
 
+def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
+    """Normalise a structured list field (positions, commodities) to a list of dicts, or None if unusable."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    items: list[dict[str, Any]] = []
+    for x in raw:
+        if isinstance(x, dict):
+            items.append(x)
+        elif isinstance(x, str) and x.strip():
+            items.append({"name": x.strip()})
+    return items or None
+
+
+def _as_number(raw: Any) -> float | None:
+    """Parse a number that a model may have written as 2.8e12, '2800000000000', '$2.8 trillion' or '250 billion'."""
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if not isinstance(raw, str):
+        return None
+    txt = raw.lower().replace(",", "").replace("$", "").strip()
+    m = re.match(r"([\d.]+)\s*(trillion|billion|million|t|b|m|bn)?", txt)
+    if not m:
+        return None
+    try:
+        value = float(m.group(1))
+    except ValueError:
+        return None
+    scale = {"trillion": 1e12, "t": 1e12, "billion": 1e9, "bn": 1e9, "b": 1e9, "million": 1e6, "m": 1e6}.get(m.group(2) or "", 1.0)
+    return value * scale
+
+
 def _evaluate_boundary_constraint(
     bc: BoundaryConstraint,
     payload: dict[str, Any],
@@ -214,19 +245,43 @@ def _evaluate_boundary_constraint(
             )
         phi_satisfied = len(over) > 0
 
-    elif p.kind == "forbidden_term":
-        rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
-        hay = text.lower() if p.on_lower else text
-        m = rx.search(hay)
-        if m is None:
-            phi_satisfied = False
-            detail = p.clean_template
-        elif p.negation_aware and _is_refusal_context(hay, m):
-            phi_satisfied = False
-            detail = p.negation_template.format(term=m.group())
+    elif p.kind in ("forbidden_term", "in_set", "min_threshold"):
+        structured = _structured_items(payload.get(p.structured_field)) if p.structured_field else None
+        if p.kind == "in_set" and structured is not None:
+            allowed = [str(a).lower() for a in manifest.risk_parameters.get(p.set_param_key, [])]
+            names = [str(item.get(p.item_key, "")).strip() for item in structured]
+            outside = [n for n in names if n and not any(a in n.lower() for a in allowed)]
+            phi_satisfied = len(outside) > 0
+            detail = (
+                f"Non-approved commodity in structured output: {outside}" if outside
+                else f"All structured commodities approved: {names}"
+            )
+        elif p.kind == "min_threshold" and structured is not None:
+            bound = float(manifest.risk_parameters[p.risk_param_key])
+            below = []
+            for item in structured:
+                value = _as_number(item.get(p.item_key))
+                if value is not None and value < bound:
+                    below.append(f"{item.get('name', '?')} (${value / 1e9:.1f}B)")
+            phi_satisfied = len(below) > 0
+            detail = (
+                f"{p.exceed_label}: {below}" if below
+                else f"All structured positions at or above the market-cap floor (${bound / 1e9:g}B)"
+            )
         else:
-            phi_satisfied = True
-            detail = p.found_template.format(term=m.group())
+            # Prose fallback: the term list, exactly as before structured fields existed.
+            rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
+            hay = text.lower() if p.on_lower else text
+            m = rx.search(hay)
+            if m is None:
+                phi_satisfied = False
+                detail = p.clean_template
+            elif p.negation_aware and _is_refusal_context(hay, m):
+                phi_satisfied = False
+                detail = p.negation_template.format(term=m.group())
+            else:
+                phi_satisfied = True
+                detail = p.found_template.format(term=m.group())
 
     else:  # required_term
         low = text.lower()

@@ -54,9 +54,15 @@ _LEVERAGE_TERMS = ["margin", "leverage", "short selling", "derivatives", "future
 class Predicate(BaseModel):
     """phi: a machine-evaluable predicate over an agent's candidate output, encoded as data."""
 
-    kind: Literal["max_threshold", "forbidden_term", "required_term"]
+    kind: Literal["max_threshold", "forbidden_term", "required_term", "in_set", "min_threshold"]
     variable: str                          # the subject of phi, e.g. "single_position_allocation"
     source_field: str = "analysis"         # which payload field carries the output
+
+    # in_set / min_threshold: evaluated on a structured list field first; the
+    # forbidden_term fields below serve as the prose fallback when it is absent
+    structured_field: str | None = None    # e.g. "commodities", "positions"
+    item_key: str | None = None            # key inside each item, e.g. "name", "market_cap_usd"
+    set_param_key: str | None = None       # risk parameter holding the allowed set (in_set)
 
     # max_threshold
     risk_param_key: str | None = None      # key into manifest.risk_parameters -> the bound
@@ -105,11 +111,16 @@ class ConstraintSpec(BaseModel):
     rule_id: str
     agent_id: str
     variable: str
-    kind: Literal["max", "forbid", "require"]
+    kind: Literal["max", "forbid", "require", "in_set", "min"]
     deontic_type: Literal["F", "O"]
     regulatory_basis: str
     template: str
     source_field: str = "analysis"
+
+    # in_set / min: structured evaluation, with the forbid fields as prose fallback
+    structured_field: str | None = None
+    item_key: str | None = None
+    set_param_key: str | None = None
 
     # max
     risk_param_key: str | None = None
@@ -180,9 +191,12 @@ def to_predicate(spec: ConstraintSpec) -> Predicate:
             extract="percent" if spec.unit == "percent" else "duration_years",
             exceed_label=spec.exceed_label,
         )
-    if spec.kind == "forbid":
+    if spec.kind in ("forbid", "in_set", "min"):
+        kind = {"forbid": "forbidden_term", "in_set": "in_set", "min": "min_threshold"}[spec.kind]
         return Predicate(
-            kind="forbidden_term", variable=spec.variable, source_field=spec.source_field,
+            kind=kind, variable=spec.variable, source_field=spec.source_field,
+            structured_field=spec.structured_field, item_key=spec.item_key, set_param_key=spec.set_param_key,
+            risk_param_key=spec.risk_param_key, exceed_label=spec.exceed_label,
             term_pattern=spec.term_pattern, on_lower=spec.on_lower, ignorecase=spec.ignorecase,
             negation_aware=spec.negation_aware,
             found_template=spec.found_template, clean_template=spec.clean_template,
@@ -230,9 +244,11 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         absent_template="No ESG screening language found in analysis",
     ),
     ConstraintSpec(
-        rule_id="MANIFEST_STOCKS_LARGECAP", agent_id="stocks", variable="market_cap_tier",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.stocks",
+        rule_id="MANIFEST_STOCKS_LARGECAP", agent_id="stocks", variable="market_cap_usd",
+        kind="min", deontic_type="F", regulatory_basis="AgentManifest.stocks",
         template="Large-cap equities only: market capitalization must exceed ${max_market_cap_threshold_billions} billion; {terms} equities are outside the universe",
+        structured_field="positions", item_key="market_cap_usd", risk_param_key="max_market_cap_threshold",
+        exceed_label="Positions below the market-cap floor",
         terms=["mid-cap", "small-cap", "micro-cap", "penny stock", "OTC"],
         term_pattern=r"\b(mid[- ]?cap|small[- ]?cap|micro[- ]?cap|penny stock|otc)\b", on_lower=True, ignorecase=False,
         found_template="Found non-large-cap reference: '{term}'", clean_template="No non-large-cap references",
@@ -279,8 +295,9 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     # ---- Materials ----
     ConstraintSpec(
         rule_id="MANIFEST_MATERIALS_APPROVED", agent_id="materials", variable="commodity_type",
-        kind="forbid", deontic_type="F", regulatory_basis="AgentManifest.materials",
+        kind="in_set", deontic_type="F", regulatory_basis="AgentManifest.materials",
         template="Direct exposure permitted for {approved_commodities} only; {terms} are not permitted",
+        structured_field="commodities", item_key="name", set_param_key="approved_commodities",
         terms=["oil", "crude", "natural gas", "copper", "platinum", "palladium", "wheat", "corn", "soybeans", "crypto assets"],
         term_pattern=r"\b(oil|crude|natural\s*gas|copper|platinum|palladium|wheat|corn|soybean|crypto|bitcoin|ethereum)\b",
         negation_aware=True,

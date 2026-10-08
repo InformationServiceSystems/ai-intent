@@ -37,3 +37,7 @@ Partly. ORM would remove C1 and C3 by construction, because the verbalisation of
 - The Compliance Agent's interpreter is untouched; the oracle test still reproduces it byte for byte with the generated texts.
 
 Roadmap item 2.1 was rewritten accordingly: the ORM principle is applied, the ORM tooling is not, and the conditions under which full ORM would pay off are stated.
+
+## Update, 8 October 2026, evening: structured outputs (ROADMAP 1.2)
+
+The equities agent now returns `positions` with `market_cap_usd`, the commodities agent `commodities` with names. The large-cap rule is a threshold constraint (`min`) over the capitalisation against `max_market_cap_threshold`, the approved-commodities rule a set constraint (`in_set`) over the names against `approved_commodities`. The term lists remain as prose fallback when a field is absent, reproducing the earlier behaviour exactly. Lithium now fails the set constraint and a $4 billion company fails the threshold, whatever the prose says. Credit ratings, durations and ESG remain prose-evaluated; the mechanism to retire them is in place.

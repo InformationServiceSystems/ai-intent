@@ -19,9 +19,11 @@ Respond ONLY in this JSON format (no other text):
   "recommendation": "buy | hold | sell | not_applicable",
   "confidence": "high | medium | low",
   "proposed_allocation": [0.10, 0.05],
+  "commodities": [{"name": "Gold", "allocation": 0.10}],
   "out_of_scope": false
 }
 "proposed_allocation" is the list of per-commodity allocation fractions you are proposing, as decimals (0.10 = 10%). Use an empty list [] if you propose no specific allocations. These numbers are checked directly against your allocation limit.
+"commodities" lists each commodity you recommend by name with its allocation fraction. Names are checked directly against the approved list.
 If the query is out of scope, set out_of_scope to true and name the specific constraint violated in analysis."""
 
 

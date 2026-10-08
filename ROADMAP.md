@@ -19,9 +19,11 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 1.2 Structured agent outputs instead of prose extraction
 
-**Status:** planned. **Motivation:** the two term-based templates check prose with regular expressions and synonym lists. They produce the false positives of Limitation 4 and miss anything outside their vocabulary (a commodity such as lithium passes "Gold and Silver only"). The percent template already prefers the structured `proposed_allocation` field and falls back to prose only when it is absent.
+**Status:** done for the two constraints that needed it, 8 October 2026. The equities agent returns `positions` (name, `market_cap_usd`, allocation) and the commodities agent returns `commodities` (name, allocation) alongside `proposed_allocation`. The large-cap rule is now a threshold constraint over `market_cap_usd` against `max_market_cap_threshold`, and the approved-commodities rule a set constraint over commodity names against `approved_commodities`; both are `ConstraintSpec` kinds (`min`, `in_set`) with the former term lists retained as a prose fallback when the field is absent. The fallback reproduces the earlier behaviour byte for byte, so the oracle test still holds. A commodity such as lithium, or a company stated to be a leading firm without a capitalisation above the floor, is now caught from the structured field.
 
-**Scope:** require typed fields in every sub-agent response (`proposed_allocation`, `instrument_type`, `commodity`, `credit_rating`, `duration_years`, `esg_assessment`, `inflation_rationale`) and evaluate predicates on those fields first. Prose extraction remains as a logged fallback with a `source: prose` marker in the verdict, so the trace shows which path produced each verdict. *Depends on* nothing; *enables* 2.1.
+**Remaining:** credit ratings, duration and ESG assessment are still read from prose. Extending the typed fields to `credit_rating`, `duration_years` and `esg_assessment` would retire the remaining regular expressions; the mechanism is in place.
+
+*Depends on* nothing; *enabled* 2.1's last step.
 
 ### 1.3 Defeasible norms and session-mutable Mandates
 
@@ -37,7 +39,7 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 **Why not full ORM here.** Fourteen constraints in four mandates, written and reviewed by developers, do not justify a modelling tool chain (NORMA requires Visual Studio on Windows) whose verbalisations nobody outside the team would read. Full ORM becomes worthwhile when mandates are authored by compliance staff who review the verbalisations, or when dozens of mandates with cross-references exist. The paper cites ORM as the source of the principle.
 
-**What remains.** The two proxies are still term lists over prose. Replacing them by a set constraint (`commodity ∈ approved_commodities`) and a threshold constraint (`market_cap > max_market_cap_threshold`) requires structured agent outputs (1.2). Once those exist, `ConstraintSpec` gains the kinds `in_set` and `min_threshold` and the proxies disappear.
+**Done the same day.** With structured outputs (1.2) the two proxies became a set constraint (`commodity ∈ approved_commodities`) and a threshold constraint (`market_cap ≥ max_market_cap_threshold`), as `ConstraintSpec` kinds `in_set` and `min`; the term lists remain only as prose fallback.
 
 *Depends on* 1.2 for the last step. *Enables* 2.2.
 

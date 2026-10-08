@@ -38,7 +38,13 @@ def _bound(bc: BoundaryConstraint) -> float | None:
 
 
 def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
-    """C1: a max_threshold constraint's text must state the same number the predicate enforces."""
+    """C1: a threshold constraint's text must state the same number the predicate enforces."""
+    if bc.predicate.kind == "min_threshold":
+        bound = _bound(bc)
+        if bound is None or f"{bound / 1e9:g} billion" not in bc.text:
+            return [Finding(check="C1_BOUND", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                            detail=f"text does not state the floor of {bound} (expected '{(bound or 0) / 1e9:g} billion')")]
+        return []
     if bc.predicate.kind != "max_threshold":
         return []
     bound = _bound(bc)
@@ -71,7 +77,13 @@ def _alternatives(pattern: str) -> list[str]:
 def check_text_names_terms(bc: BoundaryConstraint) -> list[Finding]:
     """C2: a term-based constraint's text must name at least one of the terms the predicate looks for."""
     text = bc.text.lower()
-    if bc.predicate.kind == "forbidden_term" and bc.predicate.term_pattern:
+    if bc.predicate.kind == "in_set" and bc.predicate.set_param_key:
+        allowed = get_manifest(bc.agent_id).risk_parameters.get(bc.predicate.set_param_key, [])
+        missing = [a for a in allowed if str(a).lower() not in text]
+        if missing:
+            return [Finding(check="C2_TERMS", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                            detail=f"text does not name the allowed set members {missing}")]
+    if bc.predicate.kind in ("forbidden_term", "in_set", "min_threshold") and bc.predicate.term_pattern:
         alts = _alternatives(bc.predicate.term_pattern)
         if not any(a[:5] in text for a in alts):
             return [Finding(check="C2_TERMS", rule_id=bc.rule_id, agent_id=bc.agent_id,
