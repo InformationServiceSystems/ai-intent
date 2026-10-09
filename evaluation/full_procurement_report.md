@@ -50,6 +50,8 @@ Tested on 5 out-of-scope cases; 5/5 scored perfect (2). Score: 100.0% (threshold
 **Constraint Detection Accuracy (CDA):** 
 Tested on 3 cases; late or missing detections on ['PC-09', 'PC-11', 'PC-12']. Score: 50.0% (threshold 90%).
 
+*CDA exposure:* the agents proposed 2 of 3 expected violations (66.7%); 0 of the 2 proposed were caught on the first attempt. A CDA score below 2 with low exposure means the agent complied, not that the gate missed.
+
 **Accountability Trace Completeness (ATC):** 
 All 12 notes carry session id, every consulted agent, the rule ids of revised agents and a quantified figure. Score: 100.0%.
 

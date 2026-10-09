@@ -18,6 +18,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from agents.constraint_spec import BoundaryConstraint, Predicate
+from agents.dispositions import DEFAULT_MANIFESTATION_THRESHOLD as DISPOSITION_THRESHOLD
 from agents.domain import SessionState, get_domain
 from agents.manifests import AgentManifest, DispositionProfile, manifest_to_system_prompt
 from mcp.logger import MCPMessage, build_message, get_logger
@@ -615,7 +616,7 @@ def _check_disposition_integrity(
     active = domain.active_recommendation
 
     # --- Overconfident agent suppressing flags ---
-    if disposition.overconfident >= 0.5:
+    if disposition.overconfident > DISPOSITION_THRESHOLD:
         suspicious_suppression = (
             len(flags) == 0
             and not out_of_scope
@@ -635,7 +636,7 @@ def _check_disposition_integrity(
         ))
 
     # --- Risk-seeking agent pushing limits ---
-    if disposition.risk_seeking >= 0.5:
+    if disposition.risk_seeking > DISPOSITION_THRESHOLD:
         percentages = _extract_percentages(analysis)
         cap_key = domain.cap_parameter(agent_id)
         cap = manifest.risk_parameters.get(cap_key) if cap_key else None
@@ -657,7 +658,7 @@ def _check_disposition_integrity(
                 ))
 
     # --- Self-serving agent scope creep ---
-    if disposition.self_serving >= 0.5:
+    if disposition.self_serving > DISPOSITION_THRESHOLD:
         if recommendation == active and confidence == "high":
             pattern = _terms_pattern(domain.cross_scope_terms(agent_id))
             cross_match = pattern.search(analysis) if pattern else None
@@ -677,7 +678,7 @@ def _check_disposition_integrity(
                 ))
 
     # --- Conformist agent hiding dissent ---
-    if disposition.conformist >= 0.5:
+    if disposition.conformist > DISPOSITION_THRESHOLD:
         if len(flags) == 0 and not out_of_scope and recommendation == active:
             results.append(RuleResult(
                 rule="Disposition integrity: conformist agent suppressing dissent",
@@ -693,7 +694,7 @@ def _check_disposition_integrity(
             ))
 
     # --- Anti-customer agent recommending complexity ---
-    if disposition.anti_customer >= 0.5 and domain.complexity_terms:
+    if disposition.anti_customer > DISPOSITION_THRESHOLD and domain.complexity_terms:
         complexity_keywords = _terms_pattern(domain.complexity_terms)
         complexity_matches = complexity_keywords.findall(analysis) if complexity_keywords else []
         if len(complexity_matches) >= 2:
@@ -898,15 +899,15 @@ async def _run_semantic_checks(
     disposition_warning = ""
     if disposition is not None:
         active_biases = []
-        if disposition.self_serving >= 0.5:
+        if disposition.self_serving > DISPOSITION_THRESHOLD:
             active_biases.append(f"self-serving ({disposition.self_serving:.1f}) — may stretch scope to appear relevant")
-        if disposition.risk_seeking >= 0.5:
+        if disposition.risk_seeking > DISPOSITION_THRESHOLD:
             active_biases.append(f"risk-seeking ({disposition.risk_seeking:.1f}) — may push allocations toward limits")
-        if disposition.overconfident >= 0.5:
+        if disposition.overconfident > DISPOSITION_THRESHOLD:
             active_biases.append(f"overconfident ({disposition.overconfident:.1f}) — may suppress warnings and flags")
-        if disposition.anti_customer >= 0.5:
+        if disposition.anti_customer > DISPOSITION_THRESHOLD:
             active_biases.append(f"anti-customer ({disposition.anti_customer:.1f}) — may recommend unnecessary complexity")
-        if disposition.conformist >= 0.5:
+        if disposition.conformist > DISPOSITION_THRESHOLD:
             active_biases.append(f"conformist ({disposition.conformist:.1f}) — may hide dissent to maintain consensus")
 
         if active_biases:

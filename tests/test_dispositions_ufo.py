@@ -81,6 +81,15 @@ def test_custom_profile():
     assert len(found) == 1 and found[0].kind == "overconfident" and found[0].rule_ids == ["MANIFEST_STOCKS_ESG"]
 
 
+def test_integrity_checks_share_the_manifestation_threshold():
+    """The neutral conformist score of exactly 0.5 neither triggers the integrity check nor counts as a manifestation."""
+    from agents.compliance import _check_disposition_integrity
+    payload = {"analysis": "Gold 10%.", "constraint_flags": [], "recommendation": "buy", "confidence": "high", "out_of_scope": False}
+    assert _check_disposition_integrity("materials", payload, DispositionProfile(conformist=0.5)) == []
+    fired = _check_disposition_integrity("materials", payload, DispositionProfile(conformist=0.51))
+    assert [r.rule_id for r in fired] == ["DISPOSITION_CONFORMIST_DISSENT"]
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

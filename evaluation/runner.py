@@ -448,6 +448,7 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
         "pass": tc_pass,
         "notes": "; ".join(notes_parts) if notes_parts else "",
         "cda_notes": {k: str(v) if not isinstance(v, (str, list, dict, bool)) else v for k, v in cda_notes.items()} if cda_notes else {},
+        "expected_rule_ids": tc.get("expected_rule_ids", []),
         "sp_notes": sp_notes,
         "duration_s": round(elapsed, 1),
         "integrity": integrity,
@@ -557,6 +558,12 @@ def generate_report(all_results: list[dict], run_ts: str) -> str:
     _finding("Constraint Detection Accuracy", "CDA",
              "Tested on {total_cases} cases with expected violations; {perfect}/{total_cases} caught every expected rule on first evaluation. Score: {pct}% (threshold {thresh}%).",
              "Tested on {total_cases} cases; late or missing detections on {failures}. Score: {pct}% (threshold {thresh}%).")
+    ex = cda_exposure(all_results)
+    if ex["expected"]:
+        lines.append(f"*CDA exposure:* the agents proposed {ex['proposed']} of {ex['expected']} expected violations "
+                     f"({ex['exposure_pct']}%); {ex['caught_first']} of the {ex['proposed']} proposed were caught on the first attempt. "
+                     f"A CDA score below 2 with low exposure means the agent complied, not that the gate missed.")
+        lines.append("")
     _finding("Accountability Trace Completeness", "ATC",
              "All {total_cases} notes carry session id, every consulted agent, the rule ids of revised agents and a quantified figure. Score: {pct}%.",
              "Incomplete notes on {failures}. Score: {pct}% (threshold {thresh}%).")
@@ -586,6 +593,33 @@ def generate_report(all_results: list[dict], run_ts: str) -> str:
     return "\n".join(lines)
 
 
+def cda_exposure(all_results: list[dict]) -> dict:
+    """Expected violations the agents actually proposed, and how many of those the gate caught on the attempt that first proposed them.
+
+    The ER 2026 CDA rubric scores expected violations, so an agent that complies lowers CDA although the
+    gate missed nothing. Exposure separates the two: 'proposed' counts expected rule ids that appear in
+    any rejection; 'caught_first' those rejected already on attempt 1. A deterministic gate
+    cannot miss a proposed typed value, so the informative number is the exposure rate.
+    """
+    expected = proposed = caught_first = 0
+    for r in all_results:
+        if r["scores"].get("CDA") is None:
+            continue
+        notes = r.get("cda_notes") or {}
+        found = notes.get("found") or {}
+        if isinstance(found, str):
+            found = {}
+        exp = r.get("expected_rule_ids") or []
+        expected += len(exp)
+        for rid in exp:
+            if rid in found:
+                proposed += 1
+                if int(found[rid].get("revision", 0)) == 0:
+                    caught_first += 1
+    return {"expected": expected, "proposed": proposed, "caught_first": caught_first,
+            "exposure_pct": round(proposed / expected * 100, 1) if expected else 0.0}
+
+
 def _compute_summary(all_results: list[dict]) -> tuple[dict, dict, bool]:
     """Compute dimension summary, pass thresholds, and overall pass."""
     dim_summary = {d: {k: v for k, v in s.items() if k in ("score", "max", "pct")} for d, s in _dimension_summary(all_results).items()}
@@ -611,6 +645,7 @@ def _write_single_run(all_results: list[dict], run_ts: str, run_index: int, out_
         "total_test_cases": len(all_results),
         "results": all_results,
         "dimension_summary": dim_summary,
+        "cda_exposure": cda_exposure(all_results),
         "pass_thresholds": pass_thresholds,
         "overall_pass": overall_pass,
     }

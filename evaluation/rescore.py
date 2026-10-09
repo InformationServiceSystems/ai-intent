@@ -68,7 +68,7 @@ def rescore(prefix: str) -> dict:
             "scores": scores, "total": sum(applicable.values()), "max_possible": len(applicable) * 2,
             "pass": all(v >= 1 for v in applicable.values()),
             "cda_notes": {k: str(v) if not isinstance(v, (str, list, dict, bool)) else v for k, v in cda_notes.items()} if cda_notes else {},
-            "sp_notes": sp_notes, "rescored": True,
+            "sp_notes": sp_notes, "rescored": True, "expected_rule_ids": tc.get("expected_rule_ids", []),
         })
         notes = [n for n in str(r.get("notes", "")).split("; ") if n and not n.startswith("MCP messages")]
         if len(messages) > tc.get("max_mcp_messages", 999):
@@ -76,9 +76,11 @@ def rescore(prefix: str) -> dict:
         r["notes"] = "; ".join(notes)
         print(f"  {r['tc_id']}: {r['total']}/{r['max_possible']} {'PASS' if r['pass'] else 'FAIL'} {applicable}")
     dim_summary, pass_thresholds, overall = runner._compute_summary(data["results"])
-    data.update({"dimension_summary": dim_summary, "pass_thresholds": pass_thresholds, "overall_pass": overall, "rescored": True})
+    data.update({"dimension_summary": dim_summary, "cda_exposure": runner.cda_exposure(data["results"]),
+                 "pass_thresholds": pass_thresholds, "overall_pass": overall, "rescored": True})
     results_path.write_text(json.dumps(data, indent=2, default=str))
     (OUT / f"{prefix}_report.md").write_text(runner.generate_report(data["results"], data["run_timestamp"]))
+    print(f"{prefix}: CDA exposure {data['cda_exposure']}")
     print(f"{prefix}: overall {'PASS' if overall else 'FAIL'}; " + ", ".join(f"{d} {v['pct']}%" for d, v in dim_summary.items() if v["max"]))
     return data
 
