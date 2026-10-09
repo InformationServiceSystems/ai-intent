@@ -400,7 +400,7 @@ def _evaluate_boundary_constraint(
         hits = []
         for item in items:
             value = str(item.get(p.item_key, "")).lower()
-            if any(f in value for f in p.forbidden_values or []):
+            if any(_value_contains(value, f) for f in p.forbidden_values or []):
                 hits.append(f"{item.get('name', '?')}: {item.get(p.item_key)}")
         phi_satisfied = len(hits) > 0
         detail = f"Forbidden value in structured output: {hits}" if hits else "No forbidden values in structured output"
@@ -467,6 +467,19 @@ def _check_boundary_constraints(agent_id: str, payload: dict[str, Any], state: S
     domain = get_domain()
     manifest = domain.manifest(agent_id)
     return [_evaluate_boundary_constraint(bc, payload, manifest, state) for bc in domain.boundary_constraints(agent_id)]
+
+
+_VALUE_NEGATION = re.compile(r"(?:\bun|\bnon[- ]?|\bno[- ]|\bnot[- ]|\bwithout[- ])$")
+
+
+def _value_contains(value: str, forbidden: str) -> bool:
+    """Whether a typed value names a forbidden instrument; a negated occurrence ('unleveraged', 'non-leveraged', 'no margin') does not count."""
+    start = value.find(forbidden)
+    while start != -1:
+        if not _VALUE_NEGATION.search(value[:start]):
+            return True
+        start = value.find(forbidden, start + 1)
+    return False
 
 
 def _has_structured_content(raw: Any) -> bool:

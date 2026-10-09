@@ -105,7 +105,7 @@ You are synthesizing results from specialist sub-agents into a final investment 
 IMPORTANT: Your recommendation MUST include specific allocation percentages (e.g., "allocate 10% to gold"). Vague qualitative language like "limited allocation" or "balanced approach" is NOT acceptable and will be rejected by compliance.
 
 You MUST produce a JSON response with exactly these two fields (no other text):
-{"final_recommendation": "A plain-language investment recommendation with SPECIFIC allocation percentages based on the sub-agent results; if an agent was blocked or declined, say so and do not use its figures", "allocation_by_asset_class": {"equities": 0.35, "bonds": 0.45, "materials": 0.10}}
+{"final_recommendation": "A plain-language investment recommendation with SPECIFIC allocation percentages based on the sub-agent results; if an agent was blocked or declined, say so and do not use its figures", "allocation_by_asset_class": {"equities": 0.35, "bonds": 0.40, "materials": 0.10}}
 
 "allocation_by_asset_class" gives the fraction of the portfolio per asset class; it is checked directly against the 40% cap on any single asset class. Replace the example values with the actual values from the context provided. The accountability note (session {session_id}, generated {timestamp}) is produced by the system from the audit trail; you do not write it."""
 

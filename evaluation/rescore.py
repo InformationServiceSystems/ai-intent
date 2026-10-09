@@ -52,7 +52,7 @@ def rescore(prefix: str) -> dict:
             elif dim == "ATC":
                 scores[dim] = runner.score_atc(result, messages)
             elif dim == "DC":
-                scores[dim] = runner.score_dc(result, tc)
+                scores[dim] = runner.score_dc(result, tc, messages)
             elif dim == "BVC":
                 scores[dim] = runner.score_bvc(result, messages)
             elif dim == "CGP":

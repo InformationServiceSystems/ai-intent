@@ -157,6 +157,11 @@ def test_instrument_and_esg_fields_on_positions():
     lev = [{"name": "TQQQ", "market_cap_usd": 2e10, "instrument": "3x leveraged ETF", "esg_assessment": "n/a"}]
     r = _evaluate_boundary_constraint(STK_LEV, {"analysis": "x", "positions": lev}, STK)
     assert r.passed is False and "TQQQ" in r.detail
+    negated = [{"name": "Gold ETF", "market_cap_usd": 2e10, "instrument": "physical or unleveraged ETF", "esg_assessment": "n/a"},
+               {"name": "B", "market_cap_usd": 2e10, "instrument": "non-leveraged fund, no margin", "esg_assessment": "n/a"}]
+    assert _evaluate_boundary_constraint(STK_LEV, {"analysis": "x", "positions": negated}, STK).passed is True
+    mixed = [{"name": "C", "market_cap_usd": 2e10, "instrument": "unleveraged, but bought on margin", "esg_assessment": "n/a"}]
+    assert _evaluate_boundary_constraint(STK_LEV, {"analysis": "x", "positions": mixed}, STK).passed is False
     no_esg = [{"name": "Apple", "market_cap_usd": 2.8e12, "instrument": "spot equity"}]
     assert _evaluate_boundary_constraint(STK_ESG, {"analysis": "x", "positions": no_esg}, STK).passed is False
     assert _evaluate_boundary_constraint(STK_ESG, {"analysis": "Strong governance and sustainability record."}, STK).passed is True
