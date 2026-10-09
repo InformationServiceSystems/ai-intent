@@ -87,6 +87,11 @@ To change the model, set `LLM_MODEL` in a `.env` file (see `.env.example`) or in
 LLM_MODEL=llama3.1:70b streamlit run app.py
 ```
 
+The domain is chosen in the sidebar or with `AI_INTENT_DOMAIN` (default `finance`; `procurement` is the second domain):
+```bash
+AI_INTENT_DOMAIN=procurement streamlit run app.py
+```
+
 ---
 
 ## Project Structure
@@ -96,18 +101,27 @@ ai-intent/
 ├── app.py                      # Streamlit entry point + dashboard layout
 ├── requirements.txt
 │
-├── agents/
-│   ├── manifests.py            # AgentManifest, Principal, DispositionProfile, capabilities/policies
-│   ├── regulatory_rules.py     # RegulatoryRule registry + ⟨text, φ, τ⟩ BoundaryConstraints
+├── agents/                     # the kernel: names no agent, reads the active Domain
+│   ├── domain.py               # Domain, SpecialistConfig, SessionState, TestCase, presets, containment rules
+│   ├── constraint_spec.py      # ConstraintSpec: text, predicate, registry entry and schema field from one spec
+│   ├── manifests.py            # AgentManifest, Principal, DispositionProfile, capabilities/policies (finance manifests)
+│   ├── regulatory_rules.py     # RegulatoryRule registry (finance) + ⟨text, φ, τ⟩ BoundaryConstraints
+│   ├── schemas.py              # response models derived from the specs; hand-written finance oracle
 │   ├── compliance.py           # ComplianceAgent gatekeeper + route() + boundary-constraint interpreter
-│   ├── orchestrator.py         # Central orchestrator pipeline
-│   ├── dispositions.py         # Behavioral disposition presets
-│   ├── stocks.py               # Equity analysis sub-agent
-│   ├── bonds.py                # Fixed income sub-agent
-│   └── materials.py            # Commodities sub-agent
+│   ├── orchestrator.py         # Orchestrator pipeline (routing, parallel specialists, synthesis)
+│   ├── accountability.py       # Accountability note as a projection of the trace
+│   ├── delegation.py           # UFO-C delegation chain, containment checks
+│   ├── dispositions.py         # Standard preset table, tag-based manifestation attribution
+│   ├── specialist.py           # The one generic specialist agent
+│   └── stocks.py, bonds.py, materials.py   # one-line bindings of the finance specialists
+│
+├── domains/
+│   ├── finance.py              # Private investment under MiFID II (ER 2026 reference domain)
+│   └── procurement.py          # Public procurement under Directive 2014/24/EU
 │
 ├── mcp/
-│   └── logger.py               # MCPMessage model + SQLite persistence
+│   ├── logger.py               # MCPMessage model + SQLite persistence
+│   └── gufo_export.py          # Session log as a gUFO-typed RDF graph
 │
 ├── utils/
 │   └── llm.py                  # Shared LLM client (Ollama via OpenAI-compatible API)
@@ -124,7 +138,9 @@ ai-intent/
 │   └── routing_panel.py        # Routing decision display
 │
 ├── evaluation/
-│   ├── runner.py               # 19-case evaluation suite across 6 dimensions
+│   ├── runner.py               # Evaluation suite of the active domain (--domain, --cases, --dry-run), 7 dimensions
+│   ├── spec_consistency.py     # C1 to C4 over the active domain's constraints
+│   ├── sparql_checks.py        # Trace invariants as SPARQL queries
 │   ├── spot_check.py           # Quick single-case checks
 │   └── paper_analysis.py       # Aggregate analysis for the paper
 │
@@ -146,7 +162,14 @@ ai-intent/
 
 ## Evaluation
 
-The project includes a formal evaluation procedure with 19 test cases (15 core + 4 disposition-invariance) across 6 dimensions, run via `python evaluation/runner.py`:
+The project includes a formal evaluation procedure. The finance domain has 21 test cases (15 core, 4 disposition-invariance, 2 state-predicate cases) across 7 dimensions; the procurement domain has 12. The test cases are data of the domain package and the scorers read thresholds from the manifests:
+
+```bash
+python evaluation/runner.py                                   # full finance suite
+python evaluation/runner.py --dry-run --deterministic-routing  # the domain's dry-run cases
+python evaluation/runner.py --domain procurement --dry-run     # second domain
+python evaluation/runner.py --cases TC-20,TC-21                # selected cases
+```
 
 | Dimension | What it measures |
 |-----------|-----------------|
@@ -156,14 +179,16 @@ The project includes a formal evaluation procedure with 19 test cases (15 core +
 | Boundary Violation Containment (BVC) | Zero non-compliant messages delivered (zero tolerance) |
 | Compliance Gate Precision (CGP) | Zero false positives from the compliance gate |
 | Disposition Containment (DC) | Mandate limits hold regardless of agent disposition preset |
+| State Predicates (SP) | State-dependent rules are evaluated against the session state and the snapshot is in the trace |
 
 See [`paper/evaluation-procedure.md`](paper/evaluation-procedure.md) for the full test suite, scoring rubrics, and pass thresholds.
 
 The deterministic unit tests run without a model or network:
 
 ```bash
-python tests/test_boundary_equiv.py
-python tests/test_proposed_allocation.py
+python -m pytest tests -q          # 73 tests: oracle equivalence, specs, schemas, state predicates, both domains
+python evaluation/spec_consistency.py
+AI_INTENT_DOMAIN=procurement python evaluation/spec_consistency.py
 ```
 
 ### Quick smoke test
@@ -203,7 +228,11 @@ The sidebar provides preset behavioral profiles to test compliance enforcement:
 
 ## Roadmap
 
-Planned development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md): a fourth predicate template for state-dependent constraints (which makes the rebalancing trigger checkable), structured agent outputs, Object-Role Modeling for Mandate content with verbalized constraints and deontic modality, design-time consistency checks over the OntoUML model, and the empirical follow-ups.
+Development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md). Done since: structured agent outputs, constraints as a single source, state predicates (the rebalancing trigger is checkable), the accountability note as a projection of the trace, and the generalisation of the kernel to a second domain. Open: defeasible norms, design-time checks over the OntoUML model, and the empirical follow-ups with more capable models.
+
+### Second domain: public procurement
+
+`domains/procurement.py` is the proof that the kernel is generic: a procurement coordinator and three specialists (supplies, services, works) under Directive 2014/24/EU, written as specifications only. The mixed supply-and-service contract (Art. 3) is the boundary object: the services specialist must decline when the supply share of the contract exceeds 50 %. Thresholds (Art. 4), division into lots (Art. 46), framework duration (Art. 33), subcontracting (Art. 71), conflict-of-interest screening (Art. 24) and sustainability criteria (Art. 67 and 68) are the other specifications; one state predicate caps the committed budget share. The same gate, log, export, invariants, UI and runner apply unchanged.
 
 ## Follow-up work: UFO as model content (in progress)
 

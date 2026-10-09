@@ -6,16 +6,15 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 1.1 Fourth predicate template: state predicates
 
-**Status:** planned. **Motivation:** the Materials Mandate's rebalancing trigger ("flag to orchestrator if allocation drifts more than ±5% from target") is the only boundary constraint without a predicate. The Compliance Agent has no access to portfolio state, so the trigger is an agent obligation that the gate cannot verify (Amendment 4). The same gap prevents any constraint that compares a proposed action with the current position: drift limits, concentration after the trade, cumulative exposure across agents in one session.
+**Status:** done 9 October 2026. **Motivation:** the Materials Mandate's rebalancing trigger ("flag to orchestrator if allocation drifts more than ±5% from target") was the only boundary constraint without a predicate, because the Compliance Agent had no access to portfolio state (Amendment 4). The same gap prevented any constraint that compares a proposed action with the current position.
 
-**Scope:**
+**What was done.**
 
-- Add a `Predicate` kind `state_threshold` alongside `max_threshold`, `forbidden_term` and `required_term`. It compares an extracted value of the proposed action with a value read from a **session state** object, bound through two keys: `risk_param_key` for the limit (as today) and `state_key` for the reference value (for example `current_allocation.materials` or `target_allocation.materials`).
-- Introduce a minimal, explicit `PortfolioState` model (current allocation per asset class, target allocation, session timestamp) that the orchestrator holds for the session and passes to the Compliance Agent. The state is part of the Accountability Trace: every Log Entry that evaluates a state predicate references the state snapshot it used, so an auditor can reproduce the verdict.
-- Encode the rebalancing trigger as `O(|proposed − target| ≤ rebalance_drift_threshold ∨ flagged)`: the obligation is satisfied if the drift is within the threshold, or if the agent's output carries the flag. This keeps the constraint an agent obligation while making it checkable.
-- Extend the evaluation suite with test cases whose expected violations depend on state (drift beyond threshold without flag; concentration breach only after the proposed trade), and add the rule IDs to the scorer's expected sets.
-
-**Acceptance:** the Materials Mandate has five predicates; the trace records the state snapshot per verdict; the new test cases score deterministically.
+- Two predicate kinds, `state_max` and `state_drift`, alongside the threshold, set and term kinds. Both read the proposed total from the agent's typed field (summed over the items, else the summed `proposed_allocation`) and compare it with a `SessionState` (current and target allocation per category, label, timestamp) that the orchestrator holds for the session and passes to the gate. The state is logged as `state.snapshot` before any sub-agent is called, and every `RuleResult` of a state predicate carries the snapshot it used, so the verdict is reproducible from the trace; the verdict and the accountability note repeat it.
+- The rebalancing trigger is `O(|proposed − target| ≤ rebalance_drift_threshold ∨ flagged)`: `MANIFEST_MATERIALS_REBALANCE`, kind `drift`, satisfied by the typed field `rebalance_flag` or by a constraint flag naming the drift. The Materials Mandate has five predicates.
+- A second state predicate, `MANIFEST_STOCKS_EXPOSURE` (`state_max`): the current equity allocation plus the proposed positions may not exceed `max_equity_exposure` (0.40, contained in the parent's 40 % cap). A concentration breach that only the state reveals.
+- Evaluation: TC-20 (drift beyond threshold without flag) and TC-21 (concentration after the trade) carry their own state; a new dimension SP scores whether each expected state rule was evaluated against that state and the snapshot is in the trace. The finance default state is the empty portfolio, so the ER 2026 cases are unchanged.
+- While deriving the schemas, one text-predicate mismatch surfaced that C1 to C4 could not see: "Maximum 15 % of total portfolio in raw materials" was checked per item. It is now the sum over the commodities (`aggregate="sum"`).
 
 ### 1.2 Structured agent outputs instead of prose extraction
 
@@ -63,8 +62,8 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ## 4. Platform items
 
-- **Deterministic routing for evaluation.** Done 7 October 2026 (`runner.py --deterministic-routing`): the harness fixes the routing to the test case's expected agents; the override is logged and still passes the routing checkpoint. ME is reported without the override (campaigns one and two) and with it (campaign three, pending).
-- **Accountability note as a projection of the trace.** Generate the human-readable accountability note from the Accountability Trace rather than asking the model to write it, so that trace completeness (ATC) no longer depends on instruction following.
+- **Deterministic routing for evaluation.** Done 7 October 2026 (`runner.py --deterministic-routing`): the harness fixes the routing to the test case's expected agents; the override is logged and still passes the routing checkpoint. ME is reported without the override (campaigns one and two) and with it (campaign three).
+- **Accountability note as a projection of the trace.** Done 9 October 2026 (`agents/accountability.py`). The note is generated from the log and the verdicts: session, principal, domain, every consulted agent with its complete revision history (each rejected attempt with its rule ids, Amendment 2), the number of rule evaluations, violations, blocked agents, the state snapshot and the timestamp. The synthesis model no longer writes the note; what it writes, if anything, is kept as `model_accountability_note` for comparison. Trace completeness (ATC) therefore no longer depends on instruction following.
 
 ## 5. Follow-up paper: substantive use of UFO
 
@@ -80,23 +79,23 @@ Two full campaigns ran on 7 October 2026 (`evaluation/ufo_hpc*_results_*.json`, 
 
 ## 6. Generalisation to other domains
 
-**Status:** steps 1 and 2 done 8 October 2026. The kernel reads a `Domain` object (`agents/domain.py`); the finance domain is the first package (`domains/finance.py`); the three specialist modules are bindings of one generic specialist (`agents/specialist.py`). Behaviour on the finance domain is unchanged (test suite and dry run).
+**Status:** done 9 October 2026 (steps 1 and 2 on 8 October). The kernel reads a `Domain` object (`agents/domain.py`); the finance domain is the first package (`domains/finance.py`); public procurement is the second (`domains/procurement.py`). Behaviour on the finance domain is unchanged except for the two state predicates of 1.1 and the summed materials cap.
 
-Remaining steps, in order:
+- **6.3 Roles instead of names. Done.** No kernel module (`compliance`, `orchestrator`, `delegation`, `dispositions`, `specialist`, `accountability`, `gufo_export`, `runner`) names an agent; `tests/test_generalisation.py` greps for it. The orchestrator, the gate and the specialists are read from the Domain, `get_manifest()` resolves against the active domain, thresholds come from the risk parameters (the cap an agent's risk-seeking check measures against is its first percentage cap), and the vocabularies the disposition integrity checks used (cross-scope terms, complexity terms) are `SpecialistConfig.scope_terms` and `Domain.complexity_terms`. The disposition presets, the containment rules and the test cases moved into the domain package. The UI draws the graph, the sequence diagram and the panels from the domain and has a domain switch in the sidebar.
+- **6.4 Dispositions over constraint tags. Done.** Every `ConstraintSpec` and `RegulatoryRule` carries tags (`allocation_cap`, `exposure_cap`, `leverage`, `disclosure`, `scope`, `quality_floor`, `structure`, `authority`, `specificity`, `process`, `monitoring`); `KIND_TAGS` maps the five disposition kinds to tags and `manifestation_map()` computes the characteristic rule sets. For finance the computed map equals the hand-written ER 2026 map (test), so the published attribution is unchanged.
+- **6.5 Response schemas from specs. Done.** `derive_response_model()` builds a specialist's response model from the `structured_field`, `item_key`, kind, `field_enum` and `field_description` declarations of its specs; routing and synthesis models are derived from the specialist ids and the orchestrator's specs. The derived finance schemas require the same fields as the hand-written ones (test). A domain author writes specifications and prompts only.
+- **6.6 Test cases in the domain package. Done.** `Domain.test_cases` with `dry_run` flags; the runner takes `--domain` and `--cases`; DC reads the orchestrator's and the routed specialists' caps from the manifests, ME reads the specialists' scope terms, BVC reads the domain's response method.
+- **6.7 A second domain. Done.** Public procurement under Directive 2014/24/EU: a coordinator and three specialists (supplies, services, works); the mixed supply-and-service contract (Art. 3) is the boundary object, encoded as a cap on the services specialist's `supply_share`; thresholds (Art. 4), lots (Art. 46), framework duration (Art. 33), subcontracting (Art. 71), conflict-of-interest screening (Art. 24) and sustainability criteria (Art. 67 and 68) are the other specifications; 19 specifications over 17 rule ids, one state predicate (committed budget share), twelve test cases including a mixed-contract decline, an aggressive-preset case and a state case. C1 to C3 hold by construction (`AI_INTENT_DOMAIN=procurement python evaluation/spec_consistency.py`), containment holds, the manifestation map is derived from the tags. First runs with llama3.1:8b: `paper2/generalisation-notes.md`.
 
-- **6.3 Roles instead of names.** The gate and the orchestrator still refer to `central`, `stocks`, `bonds`, `materials` in the routing check, the synthesis check, the disposition-integrity checks and the runner's DC scorer. Replace by roles read from the manifests (`composite` for the synthesis role, `decision_right` for specialists) and by thresholds read from the risk parameters.
-- **6.4 Dispositions over constraint tags.** `MANIFESTATION_MAP` names finance rule ids. Give each `ConstraintSpec` tags (`cap`, `leverage`, `disclosure`, `scope`, `quality_floor`) and map disposition kinds to tags, so attribution is valid in any domain.
-- **6.5 Response schemas from specs.** Derive each specialist's response model from the `structured_field` and `item_key` declarations of its specs, so a domain author writes specifications only.
-- **6.6 Test cases in the domain package**, with scorers reading thresholds from manifests.
-- **6.7 A second domain** as the proof: public procurement (CPV categories, thresholds, lot rules, a boundary object such as mixed supply-and-service contracts), roughly ten specifications, run through the same suite and invariants. This is the empirical core of a third paper (3.3).
+Open after 6.7: the specialist prompts (`json_instruction`) are still hand-written per specialist; generating the JSON example from the derived schema is the next step. The `recommendation` vocabulary is a domain field (`award | shortlist | reject | not_applicable` for procurement). The semantic checker's prompt still speaks of "investment" in two sentences.
 
-Transfer conditions, from the ER 2026 paper: a sortal in-or-out boundary per agent, norms expressible as decidable prohibitions or obligations over fields, session-stable Mandates, and lexicographic priority of compliance over usefulness.
+Transfer conditions, from the ER 2026 paper: a sortal in-or-out boundary per agent, norms expressible as decidable prohibitions or obligations over fields, session-stable Mandates, and lexicographic priority of compliance over usefulness. Procurement satisfies all four; the mixed contract shows that the in-or-out boundary can itself be a numeric predicate.
 
 ## Dependency summary
 
 | Item | Depends on | Enables |
 |---|---|---|
-| 1.1 State predicates | – | state-dependent test cases |
+| 1.1 State predicates (done) | – | TC-20, TC-21, SP dimension |
 | 1.2 Structured outputs | – | 2.1 |
 | 1.3 Defeasible norms | – | 3.3 |
 | 2.1 ORM Mandates | 1.2 | 2.2, 3.2 |
@@ -104,3 +103,4 @@ Transfer conditions, from the ER 2026 paper: a sortal in-or-out boundary per age
 | 3.1 Capable models | – | – |
 | 3.2 Independent oracle | 2.1 (optional) | – |
 | 3.3 Further domains | 1.3 | – |
+| 6.3 to 6.7 Generalisation (done) | 1.2, 2.1 | 3.3, third paper |

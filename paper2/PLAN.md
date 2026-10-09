@@ -36,6 +36,10 @@ UFO-C (social ontology), UFO-A/B (dispositions and events) and gUFO (the OWL ren
 | Traces | `mcp/gufo_export.py`, `evaluation/sparql_checks.py` | reads the log only | implemented, tested |
 | Orchestrator hooks | `agents/orchestrator.py` | emits the three methods above | implemented |
 | Domain package and generic specialist (ROADMAP 6, steps 1 and 2) | `agents/domain.py`, `agents/specialist.py`, `domains/finance.py` | README, ROADMAP 6 | done 8 Oct 2026, behaviour unchanged |
+| Roles instead of names, dispositions over tags, schemas from specs, test cases in the domain (ROADMAP 6.3 to 6.6) | `agents/domain.py`, `agents/compliance.py`, `agents/dispositions.py`, `agents/schemas.py`, `evaluation/runner.py --domain` | `tests/test_generalisation.py` | done 9 Oct 2026; finance manifestation map and schemas reproduced exactly |
+| Second domain: public procurement, Directive 2014/24/EU (ROADMAP 6.7) | `domains/procurement.py` | `tests/test_procurement_domain.py`, `paper2/generalisation-notes.md` | done 9 Oct 2026; 19 specs, 12 cases, C1 to C3 hold, dry run with llama3.1:8b |
+| State predicates: drift and concentration against a session state (ROADMAP 1.1) | `agents/constraint_spec.py` (`drift`, `state_max`), `agents/compliance.py`, `state.snapshot` log method | `tests/test_state_predicates.py`, TC-20, TC-21, dimension SP | done 9 Oct 2026 |
+| Accountability note as a projection of the trace (ROADMAP 4) | `agents/accountability.py` | ATC no longer depends on instruction following | done 9 Oct 2026 |
 | Structured outputs for all constraints (ROADMAP 1.2) | `agents/stocks.py`, `agents/materials.py`, `agents/compliance.py`, `agents/constraint_spec.py` | `tests/test_structured_constraints.py` | done 8 Oct 2026 |
 | Constraints as a single source (ConstraintSpec) | `agents/constraint_spec.py`; manifests and registry generated from it | ROADMAP 2.1, `paper2/spec-consistency.md` | done 8 Oct 2026; C1 to C3 hold by construction |
 | Specification-predicate consistency check C1 to C4 | `evaluation/spec_consistency.py`, `tests/test_spec_consistency.py` | `paper2/spec-consistency.md` | done 8 Oct 2026; 2 proxy predicates remain, ORM assessed |
