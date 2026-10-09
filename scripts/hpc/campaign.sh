@@ -2,11 +2,12 @@
 # Four campaigns over the SSH tunnel on local port 11435: both domains, ten runs each,
 # with llama3.1:8b (continuity with ER 2026) and llama3.3:70b (ROADMAP 3.1).
 # Usage: sh scripts/hpc/campaign.sh   (after the tunnel is open and both models are pulled)
+#        MODELS=llama3.1:8b sh scripts/hpc/campaign.sh   (one model only)
 set -u
 cd "$(dirname "$0")/../.."
 export AI_INTENT_CASE_PAUSE=2 PYTHONUNBUFFERED=1
 BASE=http://localhost:11435/v1
-for model in llama3.1:8b llama3.3:70b; do
+for model in ${MODELS:-llama3.1:8b llama3.3:70b}; do
   tag=$(echo "$model" | sed 's/llama3.1:8b/m8/; s/llama3.3:70b/m70/')
   for domain in finance procurement; do
     echo "=== $model $domain $(date)"

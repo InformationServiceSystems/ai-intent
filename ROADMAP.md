@@ -50,7 +50,7 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 3.1 More capable models
 
-**Status:** planned. Repeat the 19-case, 10-run evaluation with models whose instruction following is not the limiting factor, to separate the structural guarantees of the gate from the model-dependent dimensions (ATC, CDA, revision quality). The expectation to be tested is that trace completeness rises and detection latency falls while containment stays at the current level.
+**Status:** first campaign done 9 October 2026. Ten runs of both domains with `llama3.3:70b` next to `llama3.1:8b` on one HPC GPU node (`paper2/generalisation-notes.md`, section 7; `evaluation/c4_summary.md`). The expectation holds: containment (BVC), gate precision (CGP) and trace completeness (ATC) are 100 % in all 40 runs for both models, while the model-dependent dimensions move: with the 70B model Mandate Enforcement rises to 100 % and the agents propose fewer violations, so fewer forced blocks are needed. CDA is now reported together with the exposure rate. Open: a model outside the Llama family, and the full ER 2026 campaign protocol on the 70B model for the paper.
 
 ### 3.2 Independent verification of specification-to-predicate consistency
 

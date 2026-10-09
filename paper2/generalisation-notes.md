@@ -129,10 +129,37 @@ ME also counts a decline as naming the constraint when it uses a distinctive wor
 
 **Sleep.** During the first full finance run the machine slept for about two hours (TC-12, TC-13); the runs now use `caffeinate`.
 
-## 7. Open points for the author
+## 7. Ten-run campaigns on both domains with two models (9 October 2026, HPC)
+
+Four campaigns, each ten independent runs of the full suite with deterministic routing, one RTX PRO 6000 Blackwell (97 GB) on `forseti`, Ollama 0.40.2 with the context capped at 8192 tokens: finance (21 cases) and procurement (12 cases), each with `llama3.1:8b` (continuity with ER 2026) and `llama3.3:70b` (ROADMAP 3.1). Prefix `c4_`; `python evaluation/campaign_summary.py c4_m8_finance c4_m70_finance c4_m8_procurement c4_m70_procurement`. Run percentages, mean ± standard deviation over ten runs:
+
+| Campaign | Model | Domain | Runs | ME | CDA | ATC | BVC | CGP | DC | SP |
+|---|---|---|---|---|---|---|---|---|---|---|
+| c4_m8_finance | llama3.1:8b | finance | 10 | 87.2 ± 18.2 | 63.3 ± 8.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 68.8 ± 6.6 | 97.5 ± 7.9 |
+| c4_m70_finance | llama3.3:70b | finance | 10 | 100.0 ± 0.0 | 57.7 ± 3.4 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 63.8 ± 4.0 | 90.0 ± 22.4 |
+| c4_m8_procurement | llama3.1:8b | procurement | 10 | 100.0 ± 0.0 | 76.2 ± 17.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 100.0 ± 0.0 |
+| c4_m70_procurement | llama3.3:70b | procurement | 10 | 100.0 ± 0.0 | 77.5 ± 8.3 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 90.0 ± 21.1 |
+
+| Campaign | Sessions | Cases passed | Integrity ok | Forced blocks | Exceptions | CDA exposure | Mean s/case |
+|---|---|---|---|---|---|---|---|
+| c4_m8_finance | 210 | 187 | 210 | 30 | 0 | 65 of 136 (47.8 %), 61 on attempt 1 | 13.9 |
+| c4_m70_finance | 210 | 197 | 210 | 9 | 0 | 32 of 85 (37.6 %), 31 on attempt 1 | 46.4 |
+| c4_m8_procurement | 120 | 118 | 120 | 10 | 0 | 29 of 40 (72.5 %), 22 on attempt 1 | 10.0 |
+| c4_m70_procurement | 120 | 118 | 120 | 14 | 0 | 50 of 74 (67.6 %), 47 on attempt 1 | 43.6 |
+
+
+**What holds regardless of model and domain.** BVC, CGP and ATC are 100 % in every one of the 40 runs, all eight trace invariants hold on all 660 sessions, and no run raised an exception. The structural guarantees of the gate do not depend on the model or the domain; this is the result ROADMAP 3.1 set out to test.
+
+**What changes with the model.** The 70B model proposes fewer of the expected violations in finance (exposure 37.6 % against 47.8 %), needs fewer forced blocks (9 against 30 in 210 sessions) and declines out-of-scope requests reliably (ME 100 % in every run against 87.2 ± 18.2 %). It is about three times slower per case. In procurement the two models are close: exposure 67.6 % and 72.5 %, CDA 77.5 % and 76.2 %; the 70B model reaches the gate more often (74 expected violations scored against 40, because the 8B model declines more procurement cases, which are then scored under ME).
+
+**Reading CDA and DC.** CDA stays between 58 % and 78 % for both models because it scores expected violations an agent often does not propose; of the violations actually proposed, 91 % (8B finance: 61 of 65) to 97 % (70B finance: 31 of 32) were rejected on the first attempt, and the remainder on a later attempt when they were first proposed there. DC 50 % in procurement is one case per run (PC-11, aggressive preset) contained after one revision, scored 1 by definition; it never scored 0.
+
+**SP spread.** SP has one or two applicable cases per run, so one run with SP 1 moves the run percentage by 25 to 50 points. In each 70B campaign one run had the agent propose no allocation, so the state predicate was evaluated vacuously (TC-21 in finance; the analogous procurement case). The predicate never failed to fire when an allocation was proposed.
+
+**Infrastructure note.** The first job was killed while loading the 70B model: Ollama 0.40 sizes the KV cache for the model's full context times the ten parallel slots (325 GB). `OLLAMA_CONTEXT_LENGTH=8192` and `request_memory = 64G` in `scripts/hpc/ollama-aiintent.sub` fix it; the ER 2026 campaigns ran with an older default context.
+
+## 8. Open points for the author
 
 - Whether the four default decisions of section 5 are the ones the paper should state.
-- Ten runs of both full suites on the HPC node (`run_parallel.py --domain procurement`), and the same with a more capable model (ROADMAP 3.1).
-- Align the conformist integrity threshold (≥ 0.5) with the manifestation threshold (> 0.5).
-- Report CDA together with the rate of proposed expected violations.
+- Whether the paper reports CDA conditional on exposure (section 7) instead of the ER 2026 rubric alone.
 - The neutral preset's conformist score of 0.5 triggers the conformist integrity check (TC-21, `DISPOSITION_CONFORMIST_DISSENT` on a buy without flags). This is the ER 2026 setting and is left unchanged.

@@ -14,11 +14,13 @@ docker_network_type = host
 docker_override_entrypoint = true
 executable        = /bin/sh
 arguments         = "-c 'export HOME=/tmp OLLAMA_MODELS=/tmp/ollama-models; exec ollama serve'"
-environment       = "OLLAMA_HOST=0.0.0.0:11434 OLLAMA_KEEP_ALIVE=24h OLLAMA_NUM_PARALLEL=10 OLLAMA_MAX_LOADED_MODELS=1"
+# Ollama 0.40 sizes the KV cache for the model's full context times the parallel slots (325 GB for
+# llama3.3:70b, killed on 9 October 2026); 8192 tokens keeps 70B at about 26 GB of KV cache.
+environment       = "OLLAMA_HOST=0.0.0.0:11434 OLLAMA_KEEP_ALIVE=24h OLLAMA_NUM_PARALLEL=10 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_CONTEXT_LENGTH=8192"
 output            = ollama-aiintent.out
 error             = ollama-aiintent.err
 log               = ollama-aiintent.log
-request_memory    = 32G
+request_memory    = 64G
 request_cpus      = 8
 request_gpus      = 1
 request_disk      = 90G
