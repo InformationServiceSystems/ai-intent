@@ -57,6 +57,10 @@ def rescore(prefix: str) -> dict:
                 scores[dim] = runner.score_bvc(result, messages)
             elif dim == "CGP":
                 scores[dim] = runner.score_cgp(result, messages)
+            elif dim == "EX":
+                scores[dim], _ = runner.score_ex(result, tc)
+            elif dim == "AM":
+                scores[dim], _ = runner.score_am(result, tc, messages)
             elif dim == "SP":
                 if tc.get("expected_state_rule_ids") and runner.declined_naming_constraint(result, tc):
                     scores[dim], sp_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}

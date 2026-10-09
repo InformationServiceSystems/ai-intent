@@ -43,8 +43,9 @@ def derive_response_model(
     specs: list[ConstraintSpec],
     recommendation_values: list[str] | None = None,
     model_name: str | None = None,
+    exceptions: list | None = None,
 ) -> type[BaseModel]:
-    """Derive a specialist's response model from its specifications: base fields plus every declared structured field."""
+    """Derive a specialist's response model from its specifications and the exceptions that defeat them (ROADMAP 1.3)."""
     values = tuple(recommendation_values or ["buy", "hold", "sell", "not_applicable"])
     fields: dict[str, Any] = {
         "analysis": (str, ...),
@@ -67,6 +68,14 @@ def derive_response_model(
         else:
             spec = field_specs[0]
             fields[field_name] = (_field_type(spec), Field(..., description=spec.field_description) if spec.field_description else ...)
+    own_rules = {s.rule_id for s in own}
+    for exc in exceptions or []:
+        if exc.defeats not in own_rules:
+            continue
+        if exc.when_field and exc.when_field not in fields:
+            fields[exc.when_field] = (bool, Field(..., description=f"true only if documented: {exc.description}"))
+        if exc.requires_field and exc.requires_field not in fields:
+            fields[exc.requires_field] = (str, Field(..., description=f"the documentation reference for {exc.exception_id}; empty if none"))
     for s in own:
         if s.flag_field and s.flag_field not in fields:
             fields[s.flag_field] = (bool, Field(..., description=f"true if the obligation '{s.variable}' applies and you are flagging it"))

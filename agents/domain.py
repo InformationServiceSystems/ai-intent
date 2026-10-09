@@ -90,6 +90,11 @@ class TestCase(BaseModel):
     expected_state_rule_ids: list[str] = []
     state: SessionState | None = None
     check_synthesis_accuracy: bool = False
+    # ROADMAP 1.3: exceptions that should defeat a constraint (scored under EX), Mandate amendments the
+    # Principal issues during the session, and how many of them should be admitted (scored under AM).
+    expected_exception_ids: list[str] = []
+    amendments: list[dict[str, Any]] = []
+    expected_amendments: int = 0
 
 
 class Domain(BaseModel):

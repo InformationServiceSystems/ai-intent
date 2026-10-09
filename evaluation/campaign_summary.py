@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 ROOT = Path(__file__).resolve().parent
-DIMS = ["ME", "CDA", "ATC", "BVC", "CGP", "DC", "SP"]
+DIMS = ["ME", "CDA", "ATC", "BVC", "CGP", "DC", "SP", "EX", "AM"]
 
 
 def load(prefix: str) -> list[dict]:
