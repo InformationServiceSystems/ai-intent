@@ -57,6 +57,7 @@ class ComplianceVerdict(BaseModel):
     revision_count: int = 0
     overall_status: Literal["approved", "rejected", "forced_block"] = "approved"
     state_snapshot: dict[str, Any] | None = None   # present when a state predicate was evaluated
+    warnings: list[str] = []                       # failed warn-severity rules: recorded, not blocking
 
 
 class RevisionRequest(BaseModel):
@@ -310,6 +311,27 @@ def _evaluate_boundary_constraint(
     phi_satisfied: bool
     detail: str
     snapshot: dict[str, Any] | None = None
+
+    if p.condition_param is not None and bool(manifest.risk_parameters.get(p.condition_param)) != p.condition_value:
+        return RuleResult(rule=bc.text, rule_id=bc.rule_id, source="deterministic", passed=True,
+                          detail=f"Not applicable: {p.condition_param} is {manifest.risk_parameters.get(p.condition_param)}",
+                          regulatory_basis=bc.regulatory_basis)
+
+    if p.kind == "flag_above":
+        bound = float(manifest.risk_parameters[p.risk_param_key])
+        values = _structured_values(payload, p, manifest) if p.structured_field else None
+        top = max((v for _, v in values), default=None) if values else None
+        flags = " ".join(str(f).lower() for f in (payload.get("constraint_flags") or []))
+        flagged = any(t in flags for t in (p.flag_terms or [])) or (p.flag_field is not None and bool(payload.get(p.flag_field)))
+        if top is None:
+            phi_satisfied, detail = True, f"No {p.structured_field} stated; flag obligation not applicable"
+        else:
+            phi_satisfied = top <= bound + _EPS or flagged
+            detail = (f"{p.exceed_label} {top:g} {'above' if top > bound + _EPS else 'within'} {bound:g}, "
+                      f"{'flagged' if flagged else 'not flagged'}")
+        passed = phi_satisfied
+        return RuleResult(rule=bc.text, rule_id=bc.rule_id, source="deterministic", passed=passed, detail=detail,
+                          regulatory_basis=bc.regulatory_basis)
 
     if p.kind == "max_threshold":
         bound = manifest.risk_parameters[p.risk_param_key]
@@ -939,7 +961,8 @@ async def _run_semantic_checks(
     last_error = None
     for attempt in range(max_attempts):
         try:
-            raw = chat(_SEMANTIC_PROMPT, user_prompt)
+            gate = domain.manifest(domain.compliance_id).risk_parameters
+            raw = chat(_SEMANTIC_PROMPT, user_prompt, timeout=float(gate.get("timeout_seconds", 30)))
             parsed = safe_parse_json(raw)
             if "results" not in parsed or not isinstance(parsed["results"], list):
                 raise ValueError("Missing 'results' array in response")
@@ -1041,6 +1064,9 @@ class ComplianceAgent:
     ) -> ComplianceVerdict:
         """Evaluate a sub-agent's response (CP2); revision_count is the attempt this response answers and is logged with the verdict."""
         manifest = get_domain().manifest(agent_id)
+        gate = get_domain().manifest(get_domain().compliance_id).risk_parameters
+        if gate.get("deterministic_checks_first", True) is not True:
+            raise ValueError("deterministic_checks_first=False is not supported: the gate always evaluates predicates before the semantic checker (Amendment 3)")
 
         if analysis_payload.get("error"):
             return self._error_verdict(agent_id, analysis_payload, session_id, revision_count)
@@ -1107,8 +1133,16 @@ class ComplianceAgent:
             effective_sem.append(sr)
 
         all_results = det_results + effective_sem
-        all_passed = all(r.passed for r in all_results)
-        failures = [r for r in all_results if not r.passed]
+        domain = get_domain()
+
+        def _warn_only(r: RuleResult) -> bool:
+            rule = domain.rule(r.rule_id) if r.rule_id else None
+            return rule is not None and rule.severity == "warn"
+
+        # Only block-severity rules prevent delivery; warn-severity failures are recorded on the verdict.
+        warnings = [f"{r.rule_id}: {r.detail}" for r in all_results if not r.passed and _warn_only(r)]
+        failures = [r for r in all_results if not r.passed and not _warn_only(r)]
+        all_passed = not failures
 
         violated_rule_ids = list({r.rule_id for r in failures if r.rule_id})
         reg_basis = list({r.regulatory_basis for r in failures if r.regulatory_basis})
@@ -1134,6 +1168,7 @@ class ComplianceAgent:
             overall_status="approved" if all_passed else "rejected",
             state_snapshot=snapshot,
             revision_count=revision_count,
+            warnings=warnings,
         )
 
         status = "approved" if all_passed else "constraint_violation"

@@ -48,7 +48,7 @@ def test_domain_loads_with_roles_and_specs():
     """The package names its own roles; the kernel reads them."""
     assert PROC.orchestrator_id == "coordinator" and PROC.compliance_id == "procurement_compliance"
     assert PROC.specialist_ids == ["supplies", "services", "works"]
-    assert len(PROC.constraint_specs) == 19 and len({s.rule_id for s in PROC.constraint_specs}) == 17
+    assert len(PROC.constraint_specs) == 20 and len({s.rule_id for s in PROC.constraint_specs}) == 18
     assert all(PROC.rule(s.rule_id) is not None for s in PROC.constraint_specs), "every spec has a registry entry"
     for aid in PROC.specialist_ids:
         texts = PROC.manifest(aid).boundary_constraints

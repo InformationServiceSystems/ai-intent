@@ -44,7 +44,7 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 2.2 Design-time consistency checks over the OntoUML model
 
-**Status:** research. Render AI-Intent as a complete OntoUML model and investigate whether design-time reasoning (OntoUML validation, or an OWL rendering of the schema and the Mandates) catches the inconsistencies that the runtime gate cannot: conflicting constraints across Mandates, a risk parameter referenced by no predicate, a predicate whose key points to a parameter of another agent. *Depends on* 2.1 for the Mandate content.
+**Status:** done 9 October 2026 (`mcp/mandate_export.py`, `evaluation/design_checks.py`, `paper2/design-checks.md`). A domain's Mandates are rendered in the OntoUML model's OWL vocabulary and seven closed-world checks run on the rendering: unused parameter, foreign or missing key, contradictory bounds, set conflict, cap above parent, unregistered rule, model cardinality. On the shipped specifications they found an unenforced EU services threshold in procurement, four boolean parameters no predicate read (leverage, direct award, performance guarantee), the unchecked duration warning, two gate policies without effect, and a cardinality error in the OntoUML model (exactly one constraint per Mandate). All fixed; both domains now report no finding. An OWL-RL closure reports none of these, which is why the checks use the closed-world reading.
 
 ## 3. Empirical track
 

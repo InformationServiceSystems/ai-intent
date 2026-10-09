@@ -44,7 +44,8 @@ boundaryConstraint.description = mlt('Negative duty <text, predicate, deontic ty
 const regulatoryRule = model.createKind('Regulatory Rule');
 const regulatoryFramework = model.createKind('Regulatory Framework');
 
-model.createCharacterizationRelation(boundaryConstraint, mandate, 'constraint inheres in mandate');
+// A Mandate bears one or more boundary constraints (found by design check D7: the default end was 1..1).
+model.createCharacterizationRelation(boundaryConstraint, mandate, 'constraint inheres in mandate').getSourceEnd().cardinality.setOneToMany();
 model.createBinaryRelation(boundaryConstraint, regulatoryRule, 'operationalised by');
 model.createBinaryRelation(regulatoryRule, regulatoryFramework, 'drawn from');
 model.createBinaryRelation(mandate, mandate, 'sub-mandate of');
@@ -62,7 +63,8 @@ model.createMediationRelation(delegation, delegator, 'mediates delegator');
 model.createMediationRelation(delegation, delegatee, 'mediates delegatee');
 model.createCharacterizationRelation(commitment, delegatee, 'commitment inheres in delegatee');
 model.createExternalDependencyRelation(commitment, delegator, 'commitment depends on delegator');
-model.createCharacterizationRelation(claim, delegator, 'claim inheres in delegator');
+// A delegator holds one claim per delegation it makes, e.g. the orchestrator holds three.
+model.createCharacterizationRelation(claim, delegator, 'claim inheres in delegator').getSourceEnd().cardinality.setOneToMany();
 model.createExternalDependencyRelation(claim, delegatee, 'claim depends on delegatee');
 model.createBinaryRelation(commitment, delegation, 'commitment constitutes delegation');
 model.createBinaryRelation(claim, delegation, 'claim constitutes delegation');
@@ -90,14 +92,16 @@ model.createParticipationRelation(principal, session, 'principal participates in
 model.createBinaryRelation(agent, proposedAction, 'proposes');
 
 const verdict = model.createIntrinsicMode('Compliance Verdict');
-model.createCharacterizationRelation(verdict, agent, 'verdict inheres in agent');
+// An agent receives any number of verdicts in a session (one per evaluated action).
+model.createCharacterizationRelation(verdict, agent, 'verdict inheres in agent').getSourceEnd().cardinality.setZeroToMany();
 model.createHistoricalDependenceRelation(verdict, proposedAction, 'historically depends on');
 model.createBinaryRelation(complianceEvent, verdict, 'issues');
 model.createBinaryRelation(verdict, regulatoryRule, 'violates');
 
 const disposition = model.createIntrinsicMode('Disposition');
 disposition.description = mlt('Kind, degree in [0,1], triggering situation and characteristic rule set.');
-model.createCharacterizationRelation(disposition, agent, 'disposition inheres in agent');
+// An agent bears up to five dispositions, one per kind, or none.
+model.createCharacterizationRelation(disposition, agent, 'disposition inheres in agent').getSourceEnd().cardinality.setZeroToMany();
 model.createManifestationRelation(disposition, rejection, 'manifested in rejection');
 model.createManifestationRelation(disposition, block, 'manifested in block');
 

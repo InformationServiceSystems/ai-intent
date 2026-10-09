@@ -40,13 +40,14 @@ SERVICES_RISK: dict[str, Any] = {
     "max_supply_share": 0.50,              # Art. 3: main subject of a mixed contract
     "max_subcontracting_share": 0.30,
     "max_framework_years": 4,              # Art. 33(1)
-    "max_lot_value_eur": 221_000,
+    "max_lot_value_eur": 221_000,          # Art. 4(c); enforced since design check D1 found it unread
 }
 WORKS_RISK: dict[str, Any] = {
     "approved_cpv_divisions": ["45"],
     "max_lot_value_eur": 5_538_000,        # Art. 4(a): works threshold
     "max_subcontracting_share": 0.40,
     "performance_guarantee_required": True,
+    "direct_award_permitted": False,
 }
 
 _SINGLE_SOURCE_VALUES = ["single source", "sole source", "without prior publication", "direct award", "negotiated without"]
@@ -101,6 +102,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ),
     ConstraintSpec(
         rule_id="MANIFEST_SUPPLIES_NO_SINGLE_SOURCE", agent_id="supplies", variable="procedure",
+        condition_param="direct_award_permitted", condition_value=False,
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.supplies / Directive 2014/24/EU Art. 32", tags=["quality_floor"],
         template="No single-source or direct award: every lot must be awarded in a competitive procedure (open, restricted or competitive with negotiation); {terms} are not permitted",
         structured_field="lots", item_key="procedure", forbidden_values=_SINGLE_SOURCE_VALUES,
@@ -140,6 +142,14 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         structured_field="supply_share", risk_param_key="max_supply_share", unit="percent",
         field_description="share of the contract value that consists of supplies, 0.3 means 30%; 0 for a pure service contract",
         exceed_label="Supply share of the mixed contract",
+    ),
+    ConstraintSpec(
+        rule_id="MANIFEST_SERVICES_LOT_VALUE", agent_id="services", variable="lot_value_eur",
+        kind="max", deontic_type="F", regulatory_basis="AgentManifest.services / Directive 2014/24/EU Art. 4(c)", tags=["exposure_cap"],
+        template="No single lot above the EU services threshold of €{value}; larger requirements must be escalated to the coordinator for an EU-wide procedure",
+        structured_field="lots", item_key="estimated_value_eur", risk_param_key="max_lot_value_eur", unit="amount",
+        field_description="estimated value of the lot in euro as a number, excluding VAT",
+        exceed_label="Lots above the EU threshold",
     ),
     ConstraintSpec(
         rule_id="MANIFEST_SERVICES_SUBCONTRACTING", agent_id="services", variable="subcontracting_share",
@@ -196,6 +206,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ),
     ConstraintSpec(
         rule_id="MANIFEST_WORKS_PERFORMANCE_GUARANTEE", agent_id="works", variable="performance_guarantee",
+        condition_param="performance_guarantee_required", condition_value=True,
         kind="required_field", deontic_type="O", regulatory_basis="AgentManifest.works", tags=["disclosure"],
         template="Performance guarantee required: must state the guarantee (bond or retention) for every lot",
         structured_field="lots", item_key="performance_guarantee",
@@ -205,6 +216,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ),
     ConstraintSpec(
         rule_id="MANIFEST_WORKS_NO_SINGLE_SOURCE", agent_id="works", variable="procedure",
+        condition_param="direct_award_permitted", condition_value=False,
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.works / Directive 2014/24/EU Art. 32", tags=["quality_floor"],
         template="No single-source or direct award: every lot must be awarded in a competitive procedure; {terms} are not permitted",
         structured_field="lots", item_key="procedure", forbidden_values=_SINGLE_SOURCE_VALUES,
@@ -311,6 +323,7 @@ SERVICES_MANIFEST = AgentManifest(
     boundary_constraints=[
         _gen("MANIFEST_SERVICES_CPV_SCOPE", SERVICES_RISK),
         _gen("MANIFEST_SERVICES_MIXED_CONTRACT", SERVICES_RISK),
+        _gen("MANIFEST_SERVICES_LOT_VALUE", SERVICES_RISK),
         _gen("MANIFEST_SERVICES_SUBCONTRACTING", SERVICES_RISK),
         _gen("MANIFEST_SERVICES_FRAMEWORK_DURATION", SERVICES_RISK),
         _gen("MANIFEST_SERVICES_CONFLICT_SCREENING", SERVICES_RISK),
@@ -400,6 +413,7 @@ MANIFEST_RULES: list[RegulatoryRule] = [
     RegulatoryRule(rule_id="MANIFEST_SUPPLIES_UNIVERSE", description="Must decline any requirement whose main subject is a service or a work.", applies_to=["supplies"], check_type="semantic", severity="block", regulatory_basis="AgentManifest.supplies", tags=["scope"]),
     RegulatoryRule(rule_id="MANIFEST_SERVICES_CPV_SCOPE", description=_gen("MANIFEST_SERVICES_CPV_SCOPE", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),
     RegulatoryRule(rule_id="MANIFEST_SERVICES_MIXED_CONTRACT", description=_gen("MANIFEST_SERVICES_MIXED_CONTRACT", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),
+    RegulatoryRule(rule_id="MANIFEST_SERVICES_LOT_VALUE", description=_gen("MANIFEST_SERVICES_LOT_VALUE", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),
     RegulatoryRule(rule_id="MANIFEST_SERVICES_SUBCONTRACTING", description=_gen("MANIFEST_SERVICES_SUBCONTRACTING", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),
     RegulatoryRule(rule_id="MANIFEST_SERVICES_FRAMEWORK_DURATION", description=_gen("MANIFEST_SERVICES_FRAMEWORK_DURATION", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),
     RegulatoryRule(rule_id="MANIFEST_SERVICES_CONFLICT_SCREENING", description=_gen("MANIFEST_SERVICES_CONFLICT_SCREENING", SERVICES_RISK), applies_to=["services"], check_type="deterministic", severity="block", regulatory_basis="AgentManifest.services"),

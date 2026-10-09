@@ -26,9 +26,7 @@ from evaluation.spec_consistency import run_all  # noqa: E402
 
 KNOWN_TERM_PROXIES: set[str] = set()   # since constraint texts are generated, every forbidden term is named in the text
 # Since ROADMAP 1.1 the rebalancing trigger is a state predicate; only the duration warning remains prose-only.
-KNOWN_WITHOUT_PREDICATE = {
-    ("bonds", "Must flag any recommendation that would increase overall portfolio duration above 7 years"),
-}
+KNOWN_WITHOUT_PREDICATE: set = set()   # since ROADMAP 2.2 the duration warning is a flag obligation
 
 
 def test_numbers_in_text_match_predicate_bounds():
@@ -48,7 +46,7 @@ def test_term_proxies_are_the_known_ones():
 
 
 def test_constraints_without_predicate_are_the_known_ones():
-    """Only the documented manifest constraint lacks a predicate."""
+    """Every numeric or prohibitive manifest constraint has a predicate."""
     found = {(f.agent_id, f.detail.split(": ", 1)[1].strip("'")) for f in run_all() if f.check == "C4_COVERAGE"}
     assert found == KNOWN_WITHOUT_PREDICATE, found
 

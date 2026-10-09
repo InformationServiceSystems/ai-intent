@@ -74,7 +74,7 @@ ConstraintTag = Literal[
 
 PredicateKind = Literal[
     "max_threshold", "min_threshold", "in_set", "not_in_set", "required_field",
-    "forbidden_term", "required_term", "state_drift", "state_max",
+    "forbidden_term", "required_term", "state_drift", "state_max", "flag_above",
 ]
 
 
@@ -99,6 +99,11 @@ class Predicate(BaseModel):
     # state predicates (ROADMAP 1.1)
     state_key: str | None = None           # key into SessionState.current / .target
     flag_field: str | None = None          # payload field whose truth satisfies a drift obligation
+    flag_terms: list[str] | None = None    # constraint-flag substrings that satisfy a flag obligation
+
+    # applicability (ROADMAP 2.2, D1): the predicate applies only while a boolean risk parameter has this value
+    condition_param: str | None = None
+    condition_value: bool = False
 
     # max_threshold
     risk_param_key: str | None = None      # key into manifest.risk_parameters -> the bound
@@ -136,7 +141,7 @@ class BoundaryConstraint(BaseModel):
 # The specification both are generated from
 # ---------------------------------------------------------------------------
 
-SpecKind = Literal["max", "min", "in_set", "not_in_set", "required_field", "forbid", "require", "drift", "state_max"]
+SpecKind = Literal["max", "min", "in_set", "not_in_set", "required_field", "forbid", "require", "drift", "state_max", "flag_above"]
 
 
 class ConstraintSpec(BaseModel):
@@ -174,9 +179,14 @@ class ConstraintSpec(BaseModel):
     field_enum: list[str] | None = None
     field_description: str | None = None
 
-    # state predicates (ROADMAP 1.1)
+    # state predicates (ROADMAP 1.1) and flag obligations
     state_key: str | None = None
     flag_field: str | None = None
+    flag_terms: list[str] | None = None
+
+    # applicability: the constraint applies only while condition_param has condition_value
+    condition_param: str | None = None
+    condition_value: bool = False
 
     # max / min
     risk_param_key: str | None = None
@@ -209,7 +219,7 @@ class ConstraintSpec(BaseModel):
         """The declared field's JSON type, inferred from the kind when not stated."""
         if self.field_type:
             return self.field_type
-        if self.kind in ("max", "min", "drift", "state_max"):
+        if self.kind in ("max", "min", "drift", "state_max", "flag_above"):
             return "string" if self.value_scale == "credit_rating" else "number"
         return "string"
 
@@ -269,7 +279,7 @@ def render_text(spec: ConstraintSpec, risk_parameters: dict[str, Any]) -> str:
 _KIND_MAP: dict[str, str] = {
     "max": "max_threshold", "min": "min_threshold", "in_set": "in_set", "not_in_set": "not_in_set",
     "required_field": "required_field", "forbid": "forbidden_term", "require": "required_term",
-    "drift": "state_drift", "state_max": "state_max",
+    "drift": "state_drift", "state_max": "state_max", "flag_above": "flag_above",
 }
 
 
@@ -289,7 +299,8 @@ def to_predicate(spec: ConstraintSpec) -> Predicate:
         structured_field=spec.structured_field, item_key=spec.item_key, group_key=spec.group_key,
         aggregate=spec.aggregate, set_param_key=spec.set_param_key, forbidden_values=spec.forbidden_values,
         value_scale=spec.value_scale, min_items=spec.min_items,
-        state_key=spec.state_key, flag_field=spec.flag_field,
+        state_key=spec.state_key, flag_field=spec.flag_field, flag_terms=spec.flag_terms,
+        condition_param=spec.condition_param, condition_value=spec.condition_value,
         risk_param_key=spec.risk_param_key, extract=extract, exceed_label=spec.exceed_label,
         term_pattern=spec.term_pattern, on_lower=spec.on_lower, ignorecase=spec.ignorecase,
         negation_aware=spec.negation_aware,
@@ -318,6 +329,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         rule_id="MANIFEST_STOCKS_NO_LEVERAGE", agent_id="stocks", variable="leverage_instrument",
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.stocks", tags=["leverage"],
         template="No margin trading, short selling, or leveraged equity products",
+        condition_param="leverage_permitted", condition_value=False,
         structured_field="positions", item_key="instrument", forbidden_values=_LEVERAGE_VALUES,
         field_description="spot equity or ETF; never margin, short, leveraged or derivative products",
         terms=_LEVERAGE_TERMS, term_pattern=_LEVERAGE_PATTERN, negation_aware=True,
@@ -405,6 +417,14 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         synonyms=LADDER_SYNONYMS, present_template="Maturity ladder structure discussed",
         absent_template="No laddered maturity language found in analysis",
     ),
+    # The duration warning: O(duration <= warn_duration_years OR flagged); a warn-severity rule, recorded but not blocking.
+    ConstraintSpec(
+        rule_id="MANIFEST_BONDS_DURATION_WARN", agent_id="bonds", variable="duration_warning",
+        kind="flag_above", deontic_type="O", regulatory_basis="AgentManifest.bonds", tags=["disclosure"],
+        template="Must flag any recommendation that would increase overall portfolio duration above {value} years",
+        structured_field="portfolio_duration_years", risk_param_key="warn_duration_years", unit="years",
+        flag_terms=["duration"], exceed_label="Portfolio duration",
+    ),
     # ---- Materials ----
     ConstraintSpec(
         rule_id="MANIFEST_MATERIALS_APPROVED", agent_id="materials", variable="commodity_type",
@@ -428,6 +448,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         rule_id="MANIFEST_MATERIALS_NO_LEVERAGE", agent_id="materials", variable="leverage_instrument",
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.materials", tags=["leverage"],
         template="No leveraged commodity ETFs or futures contracts",
+        condition_param="leverage_permitted", condition_value=False,
         structured_field="commodities", item_key="instrument", forbidden_values=_LEVERAGE_VALUES,
         field_description="physical or unleveraged ETF; never leveraged ETFs or futures",
         terms=_LEVERAGE_TERMS, term_pattern=_LEVERAGE_PATTERN, negation_aware=True,

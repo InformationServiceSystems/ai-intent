@@ -232,7 +232,7 @@ failures = 0
 
 # ROADMAP 1.1 added two state predicates after the oracle was frozen; they have no imperative
 # counterpart and are excluded from the byte-for-byte comparison (tested in test_state_predicates.py).
-_POST_ORACLE_RULES = {"MANIFEST_STOCKS_EXPOSURE", "MANIFEST_MATERIALS_REBALANCE"}
+_POST_ORACLE_RULES = {"MANIFEST_STOCKS_EXPOSURE", "MANIFEST_MATERIALS_REBALANCE", "MANIFEST_BONDS_DURATION_WARN"}
 
 
 def _er2026(results):

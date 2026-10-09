@@ -294,7 +294,7 @@ BONDS_MANIFEST = AgentManifest(
         _gen("MANIFEST_BONDS_MAX_DURATION", BONDS_RISK),
         _gen("MANIFEST_BONDS_NO_EM", BONDS_RISK),
         _gen("MANIFEST_BONDS_LADDER", BONDS_RISK),
-        "Must flag any recommendation that would increase overall portfolio duration above 7 years",
+        _gen("MANIFEST_BONDS_DURATION_WARN", BONDS_RISK),
     ],
     risk_parameters=BONDS_RISK,
     plain_language_summary="Handles the safe, boring investments that pay out steadily. Only buys from creditworthy borrowers. Spreads out when bonds mature so the portfolio is never all-in on one year. No risky country debt.",

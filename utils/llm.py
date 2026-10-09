@@ -27,7 +27,7 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 
-def chat(system: str, user: str, model: str | None = None, response_format: dict | None = None) -> str:
+def chat(system: str, user: str, model: str | None = None, response_format: dict | None = None, timeout: float | None = None) -> str:
     """Send a system+user message pair to the LLM and return the response text.
 
     response_format, when given, is an OpenAI-style JSON schema that the serving layer
@@ -35,18 +35,19 @@ def chat(system: str, user: str, model: str | None = None, response_format: dict
     parameter, the call is retried without it, so older servers still work.
     """
     model_to_use = model or default_model()
+    api = client.with_options(timeout=timeout) if timeout is not None and hasattr(client, "with_options") else client
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
     if response_format is not None:
         try:
-            response = client.chat.completions.create(model=model_to_use, messages=messages, response_format=response_format)
+            response = api.chat.completions.create(model=model_to_use, messages=messages, response_format=response_format)
             return response.choices[0].message.content
         except Exception as e:  # unsupported parameter on this server: fall back to free-form JSON
             if "format" not in str(e).lower():
                 raise
-    response = client.chat.completions.create(model=model_to_use, messages=messages)
+    response = api.chat.completions.create(model=model_to_use, messages=messages)
     return response.choices[0].message.content
 
 

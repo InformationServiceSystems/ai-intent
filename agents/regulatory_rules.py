@@ -167,9 +167,9 @@ BONDS_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MANIFEST_BONDS_DURATION_WARN",
-        description="Must flag any recommendation that would increase overall portfolio duration above 7 years.",
+        description="Must flag any recommendation that would increase overall portfolio duration above 7 years (deterministic flag obligation; warn severity, recorded but not blocking).",
         applies_to=["bonds"],
-        check_type="semantic",
+        check_type="deterministic",
         severity="warn",
         regulatory_basis="AgentManifest.bonds",
         tags=["disclosure"],

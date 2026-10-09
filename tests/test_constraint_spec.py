@@ -46,7 +46,7 @@ def test_registry_order_and_predicates_follow_specs():
     """The registry has one entry per spec, in spec order, with the predicate kind the spec implies."""
     kinds = {"max": "max_threshold", "forbid": "forbidden_term", "require": "required_term", "in_set": "in_set",
              "min": "min_threshold", "not_in_set": "not_in_set", "required_field": "required_field",
-             "state_max": "state_max", "drift": "state_drift"}
+             "state_max": "state_max", "drift": "state_drift", "flag_above": "flag_above"}
     for agent_id in ("stocks", "bonds", "materials", "central"):
         specs = specs_for(agent_id)
         bcs = get_boundary_constraints_for_agent(agent_id)
