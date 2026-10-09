@@ -1,4 +1,9 @@
-"""UFO-C delegation constructs: commitments, claims and delegation relators binding Principal, Orchestrator and sub-agents."""
+"""UFO-C delegation constructs: commitments, claims and delegation relators binding Principal, Orchestrator and sub-agents.
+
+Since ROADMAP 6.3 the chain is built from the active Domain: the root is the domain's
+orchestrator, the sub-mandates are its `sub_mandate_ids`, and the numeric containment
+rules are the domain's `containment_rules`.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from agents.manifests import AgentManifest, get_manifest, get_principal
-from agents.regulatory_rules import get_rules_for_agent
+from agents.domain import get_domain
+from agents.manifests import AgentManifest, get_principal
 
 
 class Commitment(BaseModel):
@@ -57,17 +62,22 @@ class ContainmentCheck(BaseModel):
     note: str
 
 
-# Which numeric parameter of a sub-mandate is bounded by which parameter of the parent.
-# A sub-mandate may never grant more than the parent mandate holds.
+def containment_map() -> dict[tuple[str, str], str]:
+    """The active domain's containment rules as {(child_id, parameter): parent_parameter}."""
+    return {(r.child_id, r.parameter): r.parent_parameter for r in get_domain().containment_rules}
+
+
+# The finance containment rules, kept under the historical name for the E1 script.
 CONTAINMENT_MAP: dict[tuple[str, str], str] = {
     ("stocks", "max_single_position"): "max_single_asset_class",
+    ("stocks", "max_equity_exposure"): "max_single_asset_class",
     ("materials", "max_total_allocation"): "max_single_asset_class",
 }
 
 
 def _make_delegation(delegator: str, manifest: AgentManifest, parent_delegation_id: str | None) -> Delegation:
     """Construct the delegation relator, commitment and claim for one delegator-delegatee pair."""
-    rule_ids = [rule.rule_id for rule in get_rules_for_agent(manifest.agent_id)]
+    rule_ids = [rule.rule_id for rule in get_domain().rules_for(manifest.agent_id)]
     commitment_id = f"commitment:{manifest.agent_id}->{delegator}"
     commitment = Commitment(
         commitment_id=commitment_id,
@@ -102,14 +112,15 @@ def _make_delegation(delegator: str, manifest: AgentManifest, parent_delegation_
     )
 
 
-def build_delegation_chain(principal_id: str = "anonymous", root_agent_id: str = "central") -> list[Delegation]:
-    """Build the delegation chain Principal -> root agent -> sub-agents from the manifest registry."""
+def build_delegation_chain(principal_id: str = "anonymous", root_agent_id: str | None = None) -> list[Delegation]:
+    """Build the delegation chain Principal -> root agent -> sub-agents from the active domain's manifests."""
+    domain = get_domain()
     principal = get_principal(principal_id)
-    root = get_manifest(root_agent_id)
+    root = domain.manifest(root_agent_id or domain.orchestrator_id)
     root_delegation = _make_delegation(principal.principal_id, root, parent_delegation_id=None)
     chain = [root_delegation]
     for sub_id in root.sub_mandate_ids:
-        sub = get_manifest(sub_id)
+        sub = domain.manifest(sub_id)
         chain.append(_make_delegation(root.agent_id, sub, parent_delegation_id=root_delegation.delegation_id))
     return chain
 
@@ -138,7 +149,7 @@ def check_mandate_containment(parent: AgentManifest, child: AgentManifest) -> li
             note="Parent and sub-mandate must be owned by the same Principal",
         ),
     ]
-    for (agent_id, parameter), parent_parameter in CONTAINMENT_MAP.items():
+    for (agent_id, parameter), parent_parameter in containment_map().items():
         if agent_id != child.agent_id:
             continue
         child_value = child.risk_parameters.get(parameter)
@@ -160,13 +171,14 @@ def check_mandate_containment(parent: AgentManifest, child: AgentManifest) -> li
 
 def check_chain_containment(chain: list[Delegation]) -> list[ContainmentCheck]:
     """Run containment checks for every delegation in the chain whose delegator is itself an agent."""
+    domain = get_domain()
     agent_ids = {d.delegatee for d in chain}
     results: list[ContainmentCheck] = []
     for delegation in chain:
         if delegation.delegator not in agent_ids:
             continue  # delegator is the Principal; no parent mandate to compare with
-        parent = get_manifest(delegation.delegator)
-        child = get_manifest(delegation.delegatee)
+        parent = domain.manifest(delegation.delegator)
+        child = domain.manifest(delegation.delegatee)
         results.extend(check_mandate_containment(parent, child))
     return results
 

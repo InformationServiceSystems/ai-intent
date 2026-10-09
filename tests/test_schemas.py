@@ -30,7 +30,8 @@ def test_formats_carry_required_typed_fields():
     assert {"positions", "analysis", "out_of_scope"} <= required(STOCKS_FORMAT)
     assert {"holdings", "portfolio_duration_years"} <= required(BONDS_FORMAT)
     assert {"commodities", "inflation_rationale"} <= required(MATERIALS_FORMAT)
-    assert {"final_recommendation", "allocation_by_asset_class", "accountability_note"} <= required(SYNTHESIS_FORMAT)
+    assert {"final_recommendation", "allocation_by_asset_class"} <= required(SYNTHESIS_FORMAT)
+    assert "accountability_note" not in required(SYNTHESIS_FORMAT)   # ROADMAP 4: the note is a projection of the trace
     pos = STOCKS_FORMAT["json_schema"]["schema"]["$defs"]["Position"]["required"]
     assert {"name", "market_cap_usd", "instrument", "esg_assessment"} <= set(pos)
 

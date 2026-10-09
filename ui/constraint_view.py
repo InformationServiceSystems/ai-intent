@@ -4,7 +4,7 @@ from typing import Any
 
 import streamlit as st
 
-from agents.manifests import get_manifest, _MANIFEST_REGISTRY
+from agents.manifests import all_manifests, get_manifest
 from mcp.logger import MCPMessage, get_logger
 
 
@@ -142,7 +142,7 @@ def render_constraint_view(session_id: str, sub_agent_results: dict[str, Any] | 
     for msg in messages:
         if msg.method.endswith(".result"):
             agent_id = msg.method.replace(".result", "")
-            if agent_id in _MANIFEST_REGISTRY:
+            if agent_id in all_manifests():
                 agent_results[agent_id] = msg
 
     if not agent_results:

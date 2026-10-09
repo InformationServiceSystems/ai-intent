@@ -21,23 +21,20 @@ _STATUS_OVERRIDE = {
     "forced_block": "#9C27B0",
 }
 
-_ACTOR_ORDER = ["user", "central", "compliance", "stocks", "bonds", "materials"]
-_ACTOR_LABELS = {
-    "user": "User",
-    "central": "Orchestrator",
-    "compliance": "Compliance",
-    "stocks": "Stocks",
-    "bonds": "Bonds",
-    "materials": "Materials",
-}
-_ACTOR_COLORS = {
-    "user": "#78909C",
-    "central": "#FF6B6B",
-    "compliance": "#9C27B0",
-    "stocks": "#4ECDC4",
-    "bonds": "#45B7D1",
-    "materials": "#F9A825",
-}
+_PALETTE = ["#4ECDC4", "#45B7D1", "#F9A825", "#8BC34A", "#BA68C8", "#FF8A65"]
+
+
+def _actors() -> tuple[list[str], dict[str, str], dict[str, str]]:
+    """Actor order, labels and colours of the active domain: user, orchestrator, gate, then the specialists."""
+    from agents.domain import get_domain
+    d = get_domain()
+    order = ["user", d.orchestrator_id, d.compliance_id] + d.specialist_ids
+    labels = {"user": "User", d.orchestrator_id: "Orchestrator", d.compliance_id: "Compliance"}
+    colors = {"user": "#78909C", d.orchestrator_id: "#FF6B6B", d.compliance_id: "#9C27B0"}
+    for i, sid in enumerate(d.specialist_ids):
+        labels[sid] = d.manifest(sid).name.replace(" Agent", "")
+        colors[sid] = _PALETTE[i % len(_PALETTE)]
+    return order, labels, colors
 
 
 def _messages_to_json(messages: list[MCPMessage]) -> str:
@@ -61,10 +58,11 @@ def _messages_to_json(messages: list[MCPMessage]) -> str:
     for msg in filtered:
         actors_seen.add(msg.from_agent)
         actors_seen.add(msg.to_agent)
-    actors = [a for a in _ACTOR_ORDER if a in actors_seen]
+    _order, _labels, _colors = _actors()
+    actors = [a for a in _order if a in actors_seen] + sorted(a for a in actors_seen if a not in _order)
 
     actor_data = [
-        {"id": a, "label": _ACTOR_LABELS.get(a, a), "color": _ACTOR_COLORS.get(a, "#999")}
+        {"id": a, "label": _labels.get(a, a), "color": _colors.get(a, "#999")}
         for a in actors
     ]
 

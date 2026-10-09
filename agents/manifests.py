@@ -162,7 +162,7 @@ class AgentManifest(BaseModel):
 # Risk parameters are the single numeric source: the generated constraint texts below and the
 # predicates the Compliance Agent evaluates both read these values.
 CENTRAL_RISK: dict[str, Any] = {"max_single_asset_class": 0.40, "min_sub_agents_consulted": 1}
-STOCKS_RISK: dict[str, Any] = {"max_market_cap_threshold": 10_000_000_000, "max_single_position": 0.10, "leverage_permitted": False}
+STOCKS_RISK: dict[str, Any] = {"max_market_cap_threshold": 10_000_000_000, "max_single_position": 0.10, "max_equity_exposure": 0.40, "leverage_permitted": False}
 BONDS_RISK: dict[str, Any] = {"min_credit_rating": "BBB+", "max_duration_years": 10, "warn_duration_years": 7, "max_single_maturity_bucket": 0.30}
 MATERIALS_RISK: dict[str, Any] = {"max_total_allocation": 0.15, "approved_commodities": ["Gold", "Silver"], "leverage_permitted": False, "rebalance_drift_threshold": 0.05}
 
@@ -241,6 +241,7 @@ STOCKS_MANIFEST = AgentManifest(
         _gen("MANIFEST_STOCKS_MAX_POSITION", STOCKS_RISK),
         _gen("MANIFEST_STOCKS_NO_LEVERAGE", STOCKS_RISK),
         _gen("MANIFEST_STOCKS_ESG", STOCKS_RISK),
+        _gen("MANIFEST_STOCKS_EXPOSURE", STOCKS_RISK),
         "Must decline analysis of any equity outside the approved universe",
     ],
     risk_parameters=STOCKS_RISK,
@@ -259,6 +260,13 @@ STOCKS_MANIFEST = AgentManifest(
             kind="value_range",
             parameter="max_single_position",
             value=0.10,
+        ),
+        Capability(
+            capability_id="stocks_max_equity_exposure",
+            description="Total equity exposure after the proposed positions may not exceed 40% of the portfolio.",
+            kind="value_range",
+            parameter="max_equity_exposure",
+            value=0.40,
         ),
         Capability(
             capability_id="stocks_leverage_forbidden",
@@ -337,7 +345,7 @@ MATERIALS_MANIFEST = AgentManifest(
         _gen("MANIFEST_MATERIALS_MAX_ALLOC", MATERIALS_RISK),
         _gen("MANIFEST_MATERIALS_APPROVED", MATERIALS_RISK),
         _gen("MANIFEST_MATERIALS_NO_LEVERAGE", MATERIALS_RISK),
-        "Rebalancing trigger: flag to orchestrator if allocation drifts more than \u00b15% from target",
+        _gen("MANIFEST_MATERIALS_REBALANCE", MATERIALS_RISK),
         _gen("MANIFEST_MATERIALS_INFLATION", MATERIALS_RISK),
     ],
     risk_parameters=MATERIALS_RISK,
@@ -449,9 +457,23 @@ DEFAULT_PRINCIPAL = Principal(
 _PRINCIPAL_REGISTRY: dict[str, Principal] = {DEFAULT_PRINCIPAL.principal_id: DEFAULT_PRINCIPAL}
 
 
+def _active_domain():
+    """Return the active Domain, or None while the domain layer is still being imported (circular import guard)."""
+    try:
+        from agents.domain import get_domain  # local import: domain.py imports this module
+        return get_domain()
+    except Exception:
+        return None
+
+
 def get_principal(principal_id: str) -> Principal:
-    """Return the Principal for a given id, falling back to the default principal."""
-    return _PRINCIPAL_REGISTRY.get(principal_id, DEFAULT_PRINCIPAL)
+    """Return the Principal for a given id, falling back to the active domain's principal or the default."""
+    if principal_id in _PRINCIPAL_REGISTRY:
+        return _PRINCIPAL_REGISTRY[principal_id]
+    d = _active_domain()
+    if d is not None:
+        return d.principal
+    return DEFAULT_PRINCIPAL
 
 
 def register_principal(principal: Principal) -> Principal:
@@ -491,21 +513,31 @@ def ensure_principal(
 
 
 def get_manifest(agent_id: str) -> AgentManifest:
-    """Return the manifest for a given agent ID, raising KeyError if not found."""
-    if agent_id not in _MANIFEST_REGISTRY:
+    """Return the manifest for a given agent ID from the active domain (finance registry as fallback), raising KeyError if not found."""
+    d = _active_domain()
+    if d is not None and agent_id in d.manifests:
+        return d.manifests[agent_id]
+    if agent_id not in _MANIFEST_REGISTRY or (d is not None and d.domain_id != "finance"):
         raise KeyError(f"Unknown agent_id: {agent_id!r}")
     return _MANIFEST_REGISTRY[agent_id]
+
+
+def all_manifests() -> dict[str, AgentManifest]:
+    """Return every manifest of the active domain (finance registry when no domain is loaded)."""
+    d = _active_domain()
+    return dict(d.manifests) if d is not None else dict(_MANIFEST_REGISTRY)
 
 
 def get_sub_mandates(agent_id: str) -> list[AgentManifest]:
     """Return the manifests of agents whose parent_mandate_id is agent_id."""
     parent = get_manifest(agent_id)
-    return [_MANIFEST_REGISTRY[sub_id] for sub_id in parent.sub_mandate_ids if sub_id in _MANIFEST_REGISTRY]
+    registry = all_manifests()
+    return [registry[sub_id] for sub_id in parent.sub_mandate_ids if sub_id in registry]
 
 
 def get_capability(capability_id: str) -> Capability:
     """Return the Capability with the given id from any manifest, raising KeyError if not found."""
-    for manifest in _MANIFEST_REGISTRY.values():
+    for manifest in all_manifests().values():
         for cap in manifest.capabilities:
             if cap.capability_id == capability_id:
                 return cap

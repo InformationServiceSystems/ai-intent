@@ -7,7 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.delegation import CONTAINMENT_MAP, check_mandate_containment  # noqa: E402
+from agents.delegation import check_mandate_containment, containment_map  # noqa: E402
+from agents.domain import get_domain  # noqa: E402
 from agents.manifests import get_manifest  # noqa: E402
 
 MUTATIONS = [0.0, 0.5, 1.0, 1.5]   # fractions above the parent bound: 0.0 is the boundary itself
@@ -15,9 +16,9 @@ MUTATIONS = [0.0, 0.5, 1.0, 1.5]   # fractions above the parent bound: 0.0 is th
 
 def run() -> list[dict]:
     """Return one row per (sub-mandate, parameter, mutation) with the containment outcome."""
-    parent = get_manifest("central")
+    parent = get_manifest(get_domain().orchestrator_id)
     rows = []
-    for (agent_id, parameter), parent_parameter in CONTAINMENT_MAP.items():
+    for (agent_id, parameter), parent_parameter in containment_map().items():
         bound = float(parent.risk_parameters[parent_parameter])
         original = float(get_manifest(agent_id).risk_parameters[parameter])
         for frac in [None] + MUTATIONS:

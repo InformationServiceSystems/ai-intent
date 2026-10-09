@@ -230,7 +230,17 @@ SYNTHESIS_PAYLOADS = [
 failures = 0
 
 
+# ROADMAP 1.1 added two state predicates after the oracle was frozen; they have no imperative
+# counterpart and are excluded from the byte-for-byte comparison (tested in test_state_predicates.py).
+_POST_ORACLE_RULES = {"MANIFEST_STOCKS_EXPOSURE", "MANIFEST_MATERIALS_REBALANCE"}
+
+
+def _er2026(results):
+    return [r for r in results if r.rule_id not in _POST_ORACLE_RULES]
+
+
 def _compare(label, oracle_list, new_list):
+    new_list = _er2026(new_list)
     global failures
     a = [r.model_dump() for r in oracle_list]
     b = [r.model_dump() for r in new_list]

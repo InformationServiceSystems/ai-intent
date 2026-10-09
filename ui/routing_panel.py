@@ -3,7 +3,7 @@
 import streamlit as st
 
 from agents.manifests import get_manifest
-from agents.orchestrator import ROUTING_INSTRUCTION
+from agents.domain import get_domain
 from mcp.logger import MCPMessage
 
 
@@ -14,12 +14,12 @@ def render_routing_panel(route_msg: MCPMessage) -> None:
 
     # A. Routing Instruction Display
     with st.expander("Routing Instruction (sent to orchestrator LLM)", expanded=False):
-        st.code(ROUTING_INSTRUCTION, language="text")
+        st.code(get_domain().routing_instruction, language="text")
 
     # B. Agent Selection Matrix
     st.markdown("**Agent Selection Matrix:**")
 
-    all_agents = ["stocks", "bonds", "materials"]
+    all_agents = get_domain().specialist_ids
     rows = []
     for agent_id in all_agents:
         manifest = get_manifest(agent_id)

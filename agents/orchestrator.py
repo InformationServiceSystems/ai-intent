@@ -1,4 +1,10 @@
-"""Central investment orchestrator — routes all messages through ComplianceAgent."""
+"""Generic orchestrator — routes every message of the active domain through the ComplianceAgent.
+
+The orchestrator names no agent: it reads its own id, the gate and the specialists from the
+Domain (ROADMAP 6.3), holds the session state the gate's state predicates compare proposed
+actions with (ROADMAP 1.1), and generates the accountability note as a projection of the
+trace rather than asking the model for it (ROADMAP 4).
+"""
 
 import asyncio
 from datetime import datetime, timezone
@@ -6,25 +12,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from agents.compliance import (
-    ComplianceVerdict,
-    get_compliance_agent,
-)
+from agents.accountability import build_accountability_note, compliance_history
+from agents.compliance import ComplianceVerdict, get_compliance_agent
 from agents.delegation import accountability_record, build_delegation_chain, check_chain_containment
 from agents.dispositions import detect_manifestations
-from agents.manifests import (
-    DispositionProfile,
-    confidence_at_or_below,
-    get_manifest,
-    manifest_to_system_prompt,
-)
+from agents.domain import SessionState, get_domain
+from agents.manifests import DispositionProfile, confidence_at_or_below, manifest_to_system_prompt
 from agents.specialist import specialist_functions
 from mcp.logger import build_message, get_logger
-from agents.domain import get_domain
 from utils.llm import chat, safe_parse_json
-
-
-
 
 
 class OrchestrationResult(BaseModel):
@@ -44,13 +40,14 @@ class OrchestrationResult(BaseModel):
     total_revisions: int
     forced_blocks: list[str]           # replaces forced_passes
     dispositions_used: dict[str, dict[str, float]]
-    escalations: list[dict[str, Any]] = []   # uncertainty-policy escalations (populated in #2)
-    # UFO-C delegation chain and containment checks established at session start
+    escalations: list[dict[str, Any]] = []
     delegation_chain: list[dict[str, Any]] = []
     containment_checks: list[dict[str, Any]] = []
-    # Commitment breaches (one per forced block) and disposition manifestations (per rejection)
     commitment_breaches: list[dict[str, Any]] = []
     disposition_manifestations: list[dict[str, Any]] = []
+    domain_id: str = "finance"
+    state_snapshot: dict[str, Any] | None = None   # the session state the state predicates used
+    model_accountability_note: str = ""            # what the model wrote, kept for comparison with the projection
 
 
 async def run(
@@ -60,15 +57,16 @@ async def run(
     preset_name: str = "neutral",
     system_prompt_modifier: str = "",
     compliance_multiplier: float = 1.0,
-    principal_id: str = "anonymous",
+    principal_id: str | None = None,
     routing_override: dict[str, Any] | None = None,
+    state: SessionState | None = None,
 ) -> OrchestrationResult:
     """Execute the full orchestration pipeline for a user query.
 
-    routing_override, when given, replaces the model's routing decision with a
-    fixed one (used by the evaluation to make out-of-scope cases reach their
-    target agent). The override is still logged as intent.route and still
-    passes the routing checkpoint of the Compliance Agent.
+    routing_override, when given, replaces the model's routing decision with a fixed one
+    (used by the evaluation). state, when given, replaces the domain's default session state
+    that the state predicates compare proposed actions with. principal_id defaults to the
+    domain's Principal.
     """
     query_clean = (query or "").strip()
     if not query_clean:
@@ -76,21 +74,20 @@ async def run(
 
     dispositions = dispositions or {}
     domain = get_domain()
-    _AGENT_FUNCS = specialist_functions()
+    oid = domain.orchestrator_id
+    agent_funcs = specialist_functions()
     logger = get_logger()
     compliance = get_compliance_agent()
+    session_state = state or domain.default_state
+    principal_id = principal_id or domain.principal.principal_id
 
-    # Bind principal to session so every log entry can be stamped
     logger.register_principal(session_id, principal_id)
 
-    # Apply compliance multiplier from disposition preset
     base_max_revisions = compliance._max_revisions
     compliance._max_revisions = round(base_max_revisions * compliance_multiplier)
 
-    central_disp = dispositions.get("central")
-    system_prompt = manifest_to_system_prompt(domain.manifest(domain.orchestrator_id), central_disp)
-
-    # Inject disposition system prompt modifier
+    central_disp = dispositions.get(oid)
+    system_prompt = manifest_to_system_prompt(domain.manifest(oid), central_disp)
     if system_prompt_modifier:
         system_prompt = f"DISPOSITION CONTEXT: {system_prompt_modifier}\n\n{system_prompt}"
 
@@ -99,27 +96,22 @@ async def run(
     forced_blocks: list[str] = []
     escalations: list[dict[str, Any]] = []
 
-    # Log dispositions with preset name
     active_disps = {k: v.model_dump() for k, v in dispositions.items() if any(val > 0 for val in v.model_dump().values())}
-    disp_payload = {
-        "preset": preset_name,
-        "compliance_multiplier": compliance_multiplier,
-    }
+    disp_payload: dict[str, Any] = {"preset": preset_name, "compliance_multiplier": compliance_multiplier}
     if active_disps:
         disp_payload["scores"] = active_disps
-    logger.log(build_message(
-        session_id, "internal", "central", "central",
-        "disposition.active", disp_payload,
-    ))
+    logger.log(build_message(session_id, "internal", oid, oid, "disposition.active", disp_payload))
 
-    # Establish the delegation chain (UFO-C): Principal -> central -> sub-agents.
-    # Commitments and claims are logged before any sub-agent is called, and the
-    # containment of every sub-mandate in its parent is checked at this point.
+    # Session state (ROADMAP 1.1): logged before any sub-agent is called so every state
+    # verdict can be reproduced from the trace.
+    logger.log(build_message(session_id, "internal", oid, oid, "state.snapshot", session_state.snapshot()))
+
+    # Delegation chain (UFO-C): Principal -> orchestrator -> sub-agents.
     delegation_chain = build_delegation_chain(principal_id)
     containment_checks = check_chain_containment(delegation_chain)
     all_contained = all(c.contained for c in containment_checks)
     logger.log(build_message(
-        session_id, "internal", "central", "central", "delegation.establish",
+        session_id, "internal", oid, oid, "delegation.establish",
         {
             "principal_id": principal_id,
             "chain": [d.model_dump() for d in delegation_chain],
@@ -130,7 +122,7 @@ async def run(
     ))
 
     # Step A — Log user query
-    logger.log(build_message(session_id, "internal", "user", "central", "user.query", {"query": query_clean}))
+    logger.log(build_message(session_id, "internal", "user", oid, "user.query", {"query": query_clean}))
 
     # Step B — Routing call → routed through compliance (CP1)
     routing = await _route_with_compliance(
@@ -144,15 +136,13 @@ async def run(
     tasks = []
     agent_ids = []
     for agent_id in agents_to_call:
-        if agent_id in _AGENT_FUNCS:
+        if agent_id in agent_funcs:
             sub_query = routing.get(f"query_for_{agent_id}")
             if not isinstance(sub_query, str) or not sub_query.strip():
                 sub_query = query_clean
-            agent_disp = dispositions.get(agent_id)
-            # Every call goes through compliance.route() — no direct calls
             tasks.append(compliance.route(
-                agent_id, _AGENT_FUNCS[agent_id], sub_query, session_id,
-                disposition=agent_disp,
+                agent_id, agent_funcs[agent_id], sub_query, session_id,
+                disposition=dispositions.get(agent_id), state=session_state,
             ))
             agent_ids.append(agent_id)
 
@@ -173,7 +163,6 @@ async def run(
             total_revisions += verdict.revision_count
 
             if result is None:
-                # FORCED BLOCK — compliance permanently rejected this agent's output
                 forced_blocks.append(agent_id)
                 agents_blocked.append(agent_id)
                 sub_agent_results[agent_id] = {
@@ -185,9 +174,7 @@ async def run(
                     "recommendation": "not_applicable",
                     "confidence": "low",
                 }
-                all_violations.append(
-                    f"{agent_id}: BLOCKED — {', '.join(verdict.rejection_reasons[:2])}"
-                )
+                all_violations.append(f"{agent_id}: BLOCKED — {', '.join(verdict.rejection_reasons[:2])}")
             else:
                 sub_agent_results[agent_id] = result
                 flags = result.get("constraint_flags", [])
@@ -195,21 +182,16 @@ async def run(
                 if result.get("out_of_scope"):
                     all_violations.append(f"{agent_id}: {result.get('analysis', 'out of scope')}")
 
-    # Commitment breaches (UFO-C): every forced block is a breach of the agent's
-    # commitment, answerable along the delegation chain up to the Principal.
+    # Commitment breaches (UFO-C)
     commitment_breaches: list[dict[str, Any]] = []
     for agent_id in forced_blocks:
         last = [v for v in all_verdicts if v.target_agent == agent_id and v.checkpoint == "analysis"]
         violated = last[-1].violated_rules if last else []
         record = accountability_record(agent_id, delegation_chain, violated)
         commitment_breaches.append(record)
-        logger.log(build_message(
-            session_id, "internal", "central", "central",
-            f"delegation.breach.{agent_id}", record, "forced_block",
-        ))
+        logger.log(build_message(session_id, "internal", oid, oid, f"delegation.breach.{agent_id}", record, "forced_block"))
 
-    # Disposition manifestations (UFO-B): attribute each logged rejection of an
-    # agent to the dispositions it bears, reading the log rather than memory.
+    # Disposition manifestations (UFO-B), read from the log
     disposition_manifestations: list[dict[str, Any]] = []
     session_messages = logger.get_session(session_id)
     for agent_id in agent_ids:
@@ -218,25 +200,19 @@ async def run(
             continue
         payload = {"preset": preset_name, "manifestations": [m.model_dump() for m in found]}
         disposition_manifestations.extend(payload["manifestations"])
-        logger.log(build_message(
-            session_id, "internal", "central", "central",
-            f"disposition.manifest.{agent_id}", payload,
-        ))
+        logger.log(build_message(session_id, "internal", oid, oid, f"disposition.manifest.{agent_id}", payload))
 
-    # Apply each agent's uncertainty policy to its result
+    # Uncertainty policies
     for agent_id, result in sub_agent_results.items():
         if not isinstance(result, dict) or result.get("blocked") or result.get("error"):
             continue
         try:
-            manifest = get_manifest(agent_id)
+            manifest = domain.manifest(agent_id)
         except KeyError:
             continue
         policy = manifest.uncertainty_policy
         observed = result.get("confidence")
-        block_triggered = (
-            policy.block_below is not None
-            and confidence_at_or_below(observed, policy.block_below)
-        )
+        block_triggered = policy.block_below is not None and confidence_at_or_below(observed, policy.block_below)
         escalate_triggered = confidence_at_or_below(observed, policy.escalate_below)
         if not (escalate_triggered or block_triggered):
             continue
@@ -251,9 +227,7 @@ async def run(
         }
         escalations.append(escalation)
         logger.log(build_message(
-            session_id, "internal", agent_id, "user",
-            f"uncertainty.escalate.{agent_id}",
-            escalation,
+            session_id, "internal", agent_id, "user", f"uncertainty.escalate.{agent_id}", escalation,
             status="escalated" if action == "escalated" else "blocked",
         ))
         if block_triggered:
@@ -270,43 +244,26 @@ async def run(
             }
             all_violations.append(f"{agent_id}: BLOCKED — uncertainty policy (confidence={observed})")
 
-    # Build compliance history for the accountability note
-    # Include EVERY consulted agent, not just those with verdicts
-    compliance_history = []
+    # Compliance history for the synthesis context and the note: full revision history from the log
+    history = compliance_history(agent_ids, logger.get_session(session_id), oid)
 
-    # Routing checkpoint
-    routing_verdicts = [v for v in all_verdicts if v.checkpoint == "routing"]
-    if routing_verdicts:
-        rv = routing_verdicts[-1]
-        if rv.overall_status == "approved":
-            compliance_history.append(f"routing: approved" + (f" after revision" if rv.revision_count > 0 else ""))
-        else:
-            compliance_history.append(f"routing: {rv.overall_status}, violated rules: {rv.violated_rules}")
+    # Step D — Synthesis call → routed through compliance (CP3). The accountability note is
+    # a projection of the trace, attached before the synthesis is logged and evaluated.
+    now = datetime.now(timezone.utc).isoformat()
 
-    # Per-agent analysis checkpoints — ensure every consulted agent appears
-    agent_verdicts: dict[str, ComplianceVerdict] = {}
-    for v in all_verdicts:
-        if v.checkpoint == "analysis":
-            agent_verdicts[v.target_agent] = v  # last verdict per agent
+    def _note(model_payload: dict[str, Any]) -> str:
+        messages = logger.get_session(session_id)
+        checked = sum(len(v.deterministic_results) + len(v.semantic_results) for v in all_verdicts)
+        return build_accountability_note(
+            session_id, principal_id, agent_ids, agents_blocked,
+            compliance_history(agent_ids, messages, oid), checked, all_violations,
+            session_state.snapshot(), now, domain.domain_id,
+        )
 
-    for agent_id in agent_ids:
-        v = agent_verdicts.get(agent_id)
-        if v is None:
-            compliance_history.append(f"{agent_id}: no compliance verdict recorded")
-        elif v.overall_status == "approved" and v.revision_count == 0:
-            compliance_history.append(f"{agent_id}: approved on first attempt")
-        elif v.overall_status == "approved" and v.revision_count > 0:
-            compliance_history.append(f"{agent_id}: approved after {v.revision_count} revision(s), violated rules: {v.violated_rules}")
-        elif v.overall_status == "forced_block":
-            compliance_history.append(f"{agent_id}: BLOCKED after {v.revision_count} revision(s), violated rules: {v.violated_rules}")
-        elif v.overall_status == "rejected":
-            compliance_history.append(f"{agent_id}: rejected, violated rules: {v.violated_rules}")
-
-    # Step D — Synthesis call → routed through compliance (CP3)
     synthesis = await _synthesize_with_compliance(
         system_prompt, query_clean, session_id, sub_agent_results,
         agent_ids, agents_blocked, all_constraints, all_violations,
-        compliance_history, compliance, all_verdicts,
+        history, compliance, all_verdicts, now, _note,
     )
 
     final_recommendation = str(synthesis.get("final_recommendation", ""))
@@ -314,7 +271,7 @@ async def run(
 
     # Step E — Log final output
     logger.log(build_message(
-        session_id, "inbound", "central", "user", "investment.response",
+        session_id, "inbound", oid, "user", domain.response_method,
         {"final_recommendation": final_recommendation, "accountability_note": accountability_note},
     ))
 
@@ -338,11 +295,12 @@ async def run(
         containment_checks=[c.model_dump() for c in containment_checks],
         commitment_breaches=commitment_breaches,
         disposition_manifestations=disposition_manifestations,
+        domain_id=domain.domain_id,
+        state_snapshot=session_state.snapshot(),
+        model_accountability_note=str(synthesis.get("model_accountability_note", "")),
     )
 
-    # Restore compliance max_revisions to base value
     compliance._max_revisions = base_max_revisions
-
     return orch_result
 
 
@@ -353,10 +311,11 @@ async def _route_with_compliance(
 ) -> dict[str, Any]:
     """Run routing call with CP1 compliance gate and retry loop."""
     logger = get_logger()
+    domain = get_domain()
+    oid, cid = domain.orchestrator_id, domain.compliance_id
     max_retries = 2
 
     if routing_override is not None:
-        # Deterministic routing: no model call, one pass through the gate, no retries.
         routing = {
             "routing_rationale": routing_override.get(
                 "routing_rationale", "Deterministic routing supplied by the evaluation harness"),
@@ -365,31 +324,30 @@ async def _route_with_compliance(
         }
         for agent_id in routing["agents_to_call"]:
             routing[f"query_for_{agent_id}"] = routing_override.get(f"query_for_{agent_id}", query)
-        logger.log(build_message(session_id, "internal", "central", "central", "intent.route", routing))
+        logger.log(build_message(session_id, "internal", oid, oid, "intent.route", routing))
         verdict = await compliance.evaluate_routing(routing, session_id)
         all_verdicts.append(verdict)
         if not verdict.approved:
             verdict.overall_status = "forced_block"
             logger.log(build_message(
-                session_id, "internal", "compliance", "central", "compliance.block.routing",
+                session_id, "internal", cid, oid, "compliance.block.routing",
                 {"reason": "Routing override rejected by compliance", "violated_rules": verdict.violated_rules},
                 "forced_block",
             ))
         return routing
 
     for attempt in range(max_retries + 1):
-        routing_prompt = system_prompt + get_domain().routing_instruction
+        routing_prompt = system_prompt + domain.routing_instruction
         try:
-            raw_routing = chat(routing_prompt, query, response_format=get_domain().routing_format)
+            raw_routing = chat(routing_prompt, query, response_format=domain.routing_format)
             routing = safe_parse_json(raw_routing)
             if not isinstance(routing, dict):
                 raise ValueError("routing output is not a JSON object")
         except Exception as e:
-            routing = {"routing_rationale": f"Routing error: {e}", "agents_to_call": ["stocks", "bonds", "materials"]}
+            routing = {"routing_rationale": f"Routing error: {e}", "agents_to_call": list(domain.specialist_ids)}
 
-        logger.log(build_message(session_id, "internal", "central", "central", "intent.route", routing))
+        logger.log(build_message(session_id, "internal", oid, oid, "intent.route", routing))
 
-        # CP1: Route through compliance
         verdict = await compliance.evaluate_routing(routing, session_id)
         all_verdicts.append(verdict)
 
@@ -399,12 +357,9 @@ async def _route_with_compliance(
         if attempt == max_retries:
             verdict.overall_status = "forced_block"
             logger.log(build_message(
-                session_id, "internal", "compliance", "central",
-                "compliance.block.routing",
-                {"reason": "Max routing retries exceeded"},
-                "forced_block",
+                session_id, "internal", cid, oid, "compliance.block.routing",
+                {"reason": "Max routing retries exceeded"}, "forced_block",
             ))
-            # Still return routing — orchestrator needs agent list even if non-compliant
             return routing
 
         query = (
@@ -421,21 +376,23 @@ async def _synthesize_with_compliance(
     sub_agent_results: dict[str, Any], agent_ids: list[str],
     agents_blocked: list[str],
     all_constraints: list[str], all_violations: list[str],
-    compliance_history: list[str],
+    compliance_history_lines: list[str],
     compliance: Any, all_verdicts: list[ComplianceVerdict],
+    now: str, note_fn: Any,
 ) -> dict[str, Any]:
-    """Run synthesis call with CP3 compliance gate and retry loop."""
+    """Run synthesis call with CP3 compliance gate and retry loop; the accountability note is projected from the trace."""
     logger = get_logger()
+    domain = get_domain()
+    oid, cid = domain.orchestrator_id, domain.compliance_id
     max_retries = 2
-    now = datetime.now(timezone.utc).isoformat()
 
     blocked_note = ""
     if agents_blocked:
         blocked_note = f"\nBLOCKED AGENTS (compliance rejected their output): {agents_blocked}\n"
 
     history_note = ""
-    if compliance_history:
-        history_note = "\nCOMPLIANCE HISTORY (include this in the accountability note):\n" + "\n".join(f"  - {h}" for h in compliance_history) + "\n"
+    if compliance_history_lines:
+        history_note = "\nCOMPLIANCE HISTORY:\n" + "\n".join(f"  - {h}" for h in compliance_history_lines) + "\n"
 
     context = (
         f"User query: {query}\n\n"
@@ -449,10 +406,10 @@ async def _synthesize_with_compliance(
     )
 
     for attempt in range(max_retries + 1):
-        synthesis_prompt = system_prompt + get_domain().synthesis_instruction.format(session_id=session_id, timestamp=now)
+        synthesis_prompt = system_prompt + domain.synthesis_instruction.replace("{session_id}", session_id).replace("{timestamp}", now)
 
         try:
-            raw_synthesis = chat(synthesis_prompt, context, response_format=get_domain().synthesis_format)
+            raw_synthesis = chat(synthesis_prompt, context, response_format=domain.synthesis_format)
             if not raw_synthesis or not raw_synthesis.strip():
                 raise ValueError("LLM returned empty response")
             synthesis = safe_parse_json(raw_synthesis)
@@ -471,12 +428,16 @@ async def _synthesize_with_compliance(
                         if isinstance(r, dict) and not r.get("error") and not r.get("blocked")
                     )
                 ),
-                "accountability_note": f"Session: {session_id} | Synthesis error (attempt {attempt+1}) | Agents: {agent_ids} | Blocked: {agents_blocked} | {now}",
+                "synthesis_error": str(e),
             }
 
-        logger.log(build_message(session_id, "internal", "central", "central", "intent.synthesize", synthesis))
+        # ROADMAP 4: the note is a projection of the trace. The model's own note, if any, is kept for comparison.
+        if synthesis.get("accountability_note"):
+            synthesis["model_accountability_note"] = str(synthesis["accountability_note"])
+        synthesis["accountability_note"] = note_fn(synthesis)
 
-        # CP3: Route through compliance
+        logger.log(build_message(session_id, "internal", oid, oid, "intent.synthesize", synthesis))
+
         verdict = await compliance.evaluate_synthesis(synthesis, sub_agent_results, session_id)
         all_verdicts.append(verdict)
 
@@ -486,10 +447,8 @@ async def _synthesize_with_compliance(
         if attempt == max_retries:
             verdict.overall_status = "forced_block"
             logger.log(build_message(
-                session_id, "internal", "compliance", "central",
-                "compliance.block.synthesis",
-                {"reason": "Max synthesis retries exceeded"},
-                "forced_block",
+                session_id, "internal", cid, oid, "compliance.block.synthesis",
+                {"reason": "Max synthesis retries exceeded"}, "forced_block",
             ))
             return synthesis
 

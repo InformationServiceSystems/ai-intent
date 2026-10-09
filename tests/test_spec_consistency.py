@@ -25,9 +25,9 @@ if "openai" not in sys.modules:
 from evaluation.spec_consistency import run_all  # noqa: E402
 
 KNOWN_TERM_PROXIES: set[str] = set()   # since constraint texts are generated, every forbidden term is named in the text
+# Since ROADMAP 1.1 the rebalancing trigger is a state predicate; only the duration warning remains prose-only.
 KNOWN_WITHOUT_PREDICATE = {
     ("bonds", "Must flag any recommendation that would increase overall portfolio duration above 7 years"),
-    ("materials", "Rebalancing trigger: flag to orchestrator if allocation drifts more than ±5% from target"),
 }
 
 
@@ -48,7 +48,7 @@ def test_term_proxies_are_the_known_ones():
 
 
 def test_constraints_without_predicate_are_the_known_ones():
-    """Only the two documented manifest constraints lack a predicate."""
+    """Only the documented manifest constraint lacks a predicate."""
     found = {(f.agent_id, f.detail.split(": ", 1)[1].strip("'")) for f in run_all() if f.check == "C4_COVERAGE"}
     assert found == KNOWN_WITHOUT_PREDICATE, found
 

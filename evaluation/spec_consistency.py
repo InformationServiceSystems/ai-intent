@@ -10,8 +10,15 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agents.constraint_spec import BoundaryConstraint  # noqa: E402
+from agents.domain import get_domain  # noqa: E402
 from agents.manifests import get_manifest  # noqa: E402
-from agents.regulatory_rules import BOUNDARY_CONSTRAINT_INDEX, BoundaryConstraint  # noqa: E402
+
+
+def _index() -> dict[str, list[BoundaryConstraint]]:
+    """The active domain's boundary constraints per agent (finance by default)."""
+    d = get_domain()
+    return {aid: d.boundary_constraints(aid) for aid in d.manifests if d.boundary_constraints(aid)}
 
 
 class Finding(BaseModel):
@@ -47,11 +54,19 @@ def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
         return []
     if bc.predicate.kind == "min_threshold":
         bound = _bound(bc)
-        if bound is None or f"{bound / 1e9:g} billion" not in bc.text:
+        if bound is None:
+            return [Finding(check="C1_BOUND", rule_id=bc.rule_id, agent_id=bc.agent_id, detail="predicate has no numeric floor")]
+        if bound >= 1e9:
+            ok = f"{bound / 1e9:g} billion" in bc.text
+            expected = f"{bound / 1e9:g} billion"
+        else:
+            ok = bound in [float(x) for x in re.findall(r"\b(\d+(?:\.\d+)?)\b", bc.text)]
+            expected = f"{bound:g}"
+        if not ok:
             return [Finding(check="C1_BOUND", rule_id=bc.rule_id, agent_id=bc.agent_id,
-                            detail=f"text does not state the floor of {bound} (expected '{(bound or 0) / 1e9:g} billion')")]
+                            detail=f"text does not state the floor of {bound} (expected '{expected}')")]
         return []
-    if bc.predicate.kind != "max_threshold":
+    if bc.predicate.kind not in ("max_threshold", "state_max", "state_drift"):
         return []
     bound = _bound(bc)
     if bound is None:
@@ -60,6 +75,12 @@ def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
     if bc.predicate.extract == "percent":
         stated = [float(x) for x in _PERCENT.findall(bc.text)]
         expected = round(bound * 100, 6)
+    elif bc.predicate.extract == "number":
+        stated = [float(x) for x in re.findall(r"\b(\d+(?:\.\d+)?)\b", bc.text)]
+        expected = bound
+    elif bc.predicate.extract == "amount":
+        stated = [float(x.replace(",", "")) for x in re.findall(r"[€$]\s*([\d,]+(?:\.\d+)?)", bc.text)]
+        expected = bound
     else:
         stated = [float(x) for x in _YEARS.findall(bc.text)]
         expected = bound
@@ -105,7 +126,7 @@ def check_registry_matches_manifest(agent_id: str) -> list[Finding]:
     """C3: the text the gate cites must be the text the agent was given in its manifest."""
     manifest_texts = get_manifest(agent_id).boundary_constraints
     findings = []
-    for bc in BOUNDARY_CONSTRAINT_INDEX.get(agent_id, []):
+    for bc in _index().get(agent_id, []):
         if bc.text in manifest_texts:
             continue
         if any(m.startswith(bc.text) or bc.text in m for m in manifest_texts):
@@ -119,7 +140,7 @@ def check_registry_matches_manifest(agent_id: str) -> list[Finding]:
 
 def check_manifest_coverage(agent_id: str) -> list[Finding]:
     """C4: a manifest constraint that states a number or a prohibition should have a predicate."""
-    covered = " ".join(bc.text.lower() for bc in BOUNDARY_CONSTRAINT_INDEX.get(agent_id, []))
+    covered = " ".join(bc.text.lower() for bc in _index().get(agent_id, []))
     findings = []
     for text in get_manifest(agent_id).boundary_constraints:
         has_number = bool(_PERCENT.search(text) or _YEARS.search(text) or re.search(r"\$\d", text))
@@ -135,7 +156,7 @@ def check_manifest_coverage(agent_id: str) -> list[Finding]:
 def run_all() -> list[Finding]:
     """Run C1 to C4 over every agent and constraint."""
     findings: list[Finding] = []
-    for agent_id, constraints in BOUNDARY_CONSTRAINT_INDEX.items():
+    for agent_id, constraints in _index().items():
         for bc in constraints:
             findings += check_text_matches_bound(bc)
             findings += check_text_names_terms(bc)
@@ -147,7 +168,7 @@ def run_all() -> list[Finding]:
 def main() -> int:
     """Print the findings and exit non-zero if any C1 or C2 inconsistency exists."""
     findings = run_all()
-    total = sum(len(v) for v in BOUNDARY_CONSTRAINT_INDEX.values())
+    total = sum(len(v) for v in _index().values())
     print(f"{total} boundary constraints checked, {len(findings)} findings")
     for f in findings:
         print(f"  [{f.check}] {f.agent_id} {f.rule_id}: {f.detail}")

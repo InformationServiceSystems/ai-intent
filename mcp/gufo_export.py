@@ -99,7 +99,13 @@ def _target_agent(method: str) -> str | None:
     if len(parts) < 3 or parts[0] != "compliance":
         return None
     # Routing and synthesis checkpoints are the orchestrator's own actions.
-    return "central" if parts[2] in ("routing", "synthesis") else parts[2]
+    if parts[2] in ("routing", "synthesis"):
+        try:
+            from agents.domain import get_domain
+            return get_domain().orchestrator_id
+        except Exception:
+            return "central"
+    return parts[2]
 
 
 def _add_verdict(

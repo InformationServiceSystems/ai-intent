@@ -4,7 +4,8 @@ from typing import Any
 
 import streamlit as st
 
-from agents.manifests import CENTRAL_MANIFEST, get_manifest, _MANIFEST_REGISTRY
+from agents.domain import get_domain
+from agents.manifests import all_manifests, get_manifest
 from mcp.logger import MCPMessage, get_logger
 
 
@@ -167,7 +168,7 @@ def render_intent_timeline(session_id: str, result: Any | None = None) -> None:
 
     agent_ids = []
     if route_msg and route_msg.payload.get("agents_to_call"):
-        agent_ids = [a for a in route_msg.payload["agents_to_call"] if a in _MANIFEST_REGISTRY]
+        agent_ids = [a for a in route_msg.payload["agents_to_call"] if a in all_manifests()]
 
     phase_complete = [
         query_msg is not None,
@@ -287,7 +288,7 @@ def _render_routing_phase(route_msg: MCPMessage, agent_ids: list[str]) -> None:
 
     # Agent selection matrix
     st.markdown("**Agent Selection Matrix:**")
-    all_agents = ["stocks", "bonds", "materials"]
+    all_agents = get_domain().specialist_ids
     for agent_id in all_agents:
         selected = agent_id in agent_ids
         sub_q = payload.get(f"query_for_{agent_id}")
@@ -308,11 +309,11 @@ def _render_routing_phase(route_msg: MCPMessage, agent_ids: list[str]) -> None:
     st.markdown("**Orchestrator Constraints (Routing Phase):**")
     num_selected = len(agent_ids)
     constraints_status = [
-        (CENTRAL_MANIFEST.boundary_constraints[0], f"Satisfied ({num_selected} agents selected)" if num_selected >= 1 else "VIOLATED"),
-        (CENTRAL_MANIFEST.boundary_constraints[1], "Will be checked at synthesis"),
-        (CENTRAL_MANIFEST.boundary_constraints[2], "Satisfied (all calls logged via MCP)"),
-        (CENTRAL_MANIFEST.boundary_constraints[3], "Will be checked at synthesis"),
-        (CENTRAL_MANIFEST.boundary_constraints[4], "Will be checked at synthesis"),
+        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[0], f"Satisfied ({num_selected} agents selected)" if num_selected >= 1 else "VIOLATED"),
+        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[1], "Will be checked at synthesis"),
+        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[2], "Satisfied (all calls logged via MCP)"),
+        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[3], "Will be checked at synthesis"),
+        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[4], "Will be checked at synthesis"),
     ]
     for constraint, status in constraints_status:
         if "Satisfied" in status:

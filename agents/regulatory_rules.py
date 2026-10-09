@@ -14,6 +14,7 @@ class RegulatoryRule(BaseModel):
     check_type: Literal["deterministic", "semantic", "both"]
     severity: Literal["block", "warn"]  # only "block" prevents delivery
     regulatory_basis: str           # e.g. "MiFID II Art. 25" or "AgentManifest.stocks"
+    tags: list[str] = []            # constraint tags (agents/constraint_spec.ConstraintTag); disposition kinds map to tags
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ MIFID2_RULES: list[RegulatoryRule] = [
         check_type="both",
         severity="block",
         regulatory_basis="MiFID II Art. 25 — Suitability Assessment",
+        tags=["allocation_cap"],
     ),
     RegulatoryRule(
         rule_id="MIFID2_ART25_LEVERAGE",
@@ -36,6 +38,7 @@ MIFID2_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="MiFID II Art. 25 — Product Governance / Leverage",
+        tags=["leverage"],
     ),
     RegulatoryRule(
         rule_id="MIFID2_ART24_SCOPE",
@@ -44,6 +47,7 @@ MIFID2_RULES: list[RegulatoryRule] = [
         check_type="both",
         severity="block",
         regulatory_basis="MiFID II Art. 24 — Fair, Clear and Not Misleading",
+        tags=["scope"],
     ),
     RegulatoryRule(
         rule_id="MIFID2_ART24_RATIONALE",
@@ -52,6 +56,7 @@ MIFID2_RULES: list[RegulatoryRule] = [
         check_type="semantic",
         severity="block",
         regulatory_basis="MiFID II Art. 24 — Information to Clients",
+        tags=["disclosure"],
     ),
     RegulatoryRule(
         rule_id="MANIFEST_DECISION_RIGHT_RESPECTED",
@@ -66,6 +71,7 @@ MIFID2_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AgentManifest.decision_right",
+        tags=["authority"],
     ),
 ]
 
@@ -108,12 +114,21 @@ STOCKS_RULES: list[RegulatoryRule] = [
         regulatory_basis="AgentManifest.stocks",
     ),
     RegulatoryRule(
+        rule_id="MANIFEST_STOCKS_EXPOSURE",
+        description="Total equity exposure after the proposed positions must not exceed 40% of the portfolio (state predicate: current allocation plus proposed positions).",
+        applies_to=["stocks"],
+        check_type="deterministic",
+        severity="block",
+        regulatory_basis="AgentManifest.stocks",
+    ),
+    RegulatoryRule(
         rule_id="MANIFEST_STOCKS_UNIVERSE",
         description="Must decline analysis of any equity outside the approved universe.",
         applies_to=["stocks"],
         check_type="semantic",
         severity="block",
         regulatory_basis="AgentManifest.stocks",
+        tags=["scope"],
     ),
 ]
 
@@ -157,6 +172,7 @@ BONDS_RULES: list[RegulatoryRule] = [
         check_type="semantic",
         severity="warn",
         regulatory_basis="AgentManifest.bonds",
+        tags=["disclosure"],
     ),
 ]
 
@@ -187,10 +203,10 @@ MATERIALS_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MANIFEST_MATERIALS_REBALANCE",
-        description="Rebalancing trigger: flag to orchestrator if allocation drifts more than ±5% from target.",
+        description="Rebalancing trigger: flag to orchestrator if the proposed raw-materials allocation drifts more than ±5% from the target allocation (state predicate; satisfied by the flag).",
         applies_to=["materials"],
-        check_type="semantic",
-        severity="warn",
+        check_type="deterministic",
+        severity="block",
         regulatory_basis="AgentManifest.materials",
     ),
     RegulatoryRule(
@@ -211,6 +227,7 @@ CENTRAL_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AgentManifest.central",
+        tags=["process"],
     ),
     RegulatoryRule(
         rule_id="MANIFEST_CENTRAL_MAX_ASSET_CLASS",
@@ -227,6 +244,7 @@ CENTRAL_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AgentManifest.central",
+        tags=["disclosure"],
     ),
     RegulatoryRule(
         rule_id="MANIFEST_CENTRAL_SURFACE_VIOLATIONS",
@@ -235,6 +253,7 @@ CENTRAL_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AgentManifest.central",
+        tags=["scope"],
     ),
     RegulatoryRule(
         rule_id="MANIFEST_CENTRAL_ACTIONABLE_OUTPUT",
@@ -245,6 +264,7 @@ CENTRAL_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AgentManifest.central / MiFID II Art. 24 — Clear Information",
+        tags=["specificity"],
     ),
 ]
 
@@ -268,6 +288,7 @@ DISPOSITION_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AI-Intent disposition integrity / MiFID II Art. 24",
+        tags=["integrity"],
     ),
     RegulatoryRule(
         rule_id="DISPOSITION_RISK_BOUNDARY",
@@ -276,6 +297,7 @@ DISPOSITION_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AI-Intent disposition integrity / MiFID II Art. 25",
+        tags=["integrity"],
     ),
     RegulatoryRule(
         rule_id="DISPOSITION_SELF_SERVING_SCOPE",
@@ -284,6 +306,7 @@ DISPOSITION_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AI-Intent disposition integrity / MiFID II Art. 24",
+        tags=["integrity"],
     ),
     RegulatoryRule(
         rule_id="DISPOSITION_CONFORMIST_DISSENT",
@@ -292,6 +315,7 @@ DISPOSITION_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AI-Intent disposition integrity / MiFID II Art. 24",
+        tags=["integrity"],
     ),
     RegulatoryRule(
         rule_id="DISPOSITION_ANTI_CUSTOMER_COMPLEXITY",
@@ -300,6 +324,7 @@ DISPOSITION_RULES: list[RegulatoryRule] = [
         check_type="deterministic",
         severity="block",
         regulatory_basis="AI-Intent disposition integrity / MiFID II Art. 25",
+        tags=["integrity"],
     ),
 ]
 
@@ -352,10 +377,20 @@ from agents.constraint_spec import (  # noqa: E402
     Predicate,
     to_boundary_constraint,
 )
-from agents.manifests import get_manifest as _get_manifest  # noqa: E402
+from agents.manifests import _MANIFEST_REGISTRY as _FINANCE_MANIFESTS  # noqa: E402
 
+# Spec-backed rules take their tags from the specification (single source).
+_SPEC_TAGS: dict[str, set[str]] = {}
+for _spec in CONSTRAINT_SPECS:
+    _SPEC_TAGS.setdefault(_spec.rule_id, set()).update(_spec.tags)
+for _rule in ALL_RULES:
+    if _rule.rule_id in _SPEC_TAGS:
+        _rule.tags = sorted(set(_rule.tags) | _SPEC_TAGS[_rule.rule_id])
+
+# The finance registry is built from the finance manifests directly (not through the
+# domain-aware get_manifest) because the finance domain package imports this module.
 BOUNDARY_CONSTRAINTS: list[BoundaryConstraint] = [
-    to_boundary_constraint(spec, _get_manifest(spec.agent_id).risk_parameters) for spec in CONSTRAINT_SPECS
+    to_boundary_constraint(spec, _FINANCE_MANIFESTS[spec.agent_id].risk_parameters) for spec in CONSTRAINT_SPECS
 ]
 
 BOUNDARY_CONSTRAINT_INDEX: dict[str, list[BoundaryConstraint]] = {}

@@ -1,31 +1,25 @@
 """Compliance Agent — first-class regulatory gatekeeper on the MCP bus.
 
-No message between financial agents is delivered directly. Every message
-is routed through the ComplianceAgent first. If rejected, delivery never
-occurs. Replaces the previous post-hoc auditor pattern.
+No message between agents is delivered directly. Every message is routed through the
+ComplianceAgent first. If rejected, delivery never occurs. Replaces the previous
+post-hoc auditor pattern.
+
+Since ROADMAP 6.3 the gate names no agent: it reads the orchestrator, the gate and the
+specialists from the active Domain, thresholds from the manifests' risk parameters and
+vocabularies from the specialist configurations. Since ROADMAP 1.1 it evaluates state
+predicates against the session state the orchestrator passes in, and records the state
+snapshot it used in every verdict.
 """
 
 import re
 from typing import Any, Callable, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel
 
-from agents.manifests import (
-    CENTRAL_MANIFEST,
-    COMPLIANCE_MANIFEST,
-    AgentManifest,
-    DispositionProfile,
-    get_manifest,
-    manifest_to_system_prompt,
-)
-from agents.regulatory_rules import (
-    BoundaryConstraint,
-    Predicate,
-    RegulatoryRule,
-    get_boundary_constraints_for_agent,
-    get_rules_for_agent,
-    RULE_REGISTRY,
-)
+from agents.constraint_spec import BoundaryConstraint, Predicate
+from agents.domain import SessionState, get_domain
+from agents.manifests import AgentManifest, DispositionProfile, manifest_to_system_prompt
 from mcp.logger import MCPMessage, build_message, get_logger
 from utils.llm import chat, safe_parse_json
 
@@ -43,6 +37,7 @@ class RuleResult(BaseModel):
     passed: bool
     detail: str
     regulatory_basis: str | None = None
+    state_snapshot: dict[str, Any] | None = None   # the session state a state predicate was evaluated against
 
 
 class ComplianceVerdict(BaseModel):
@@ -60,6 +55,7 @@ class ComplianceVerdict(BaseModel):
     semantic_results: list[RuleResult] = []
     revision_count: int = 0
     overall_status: Literal["approved", "rejected", "forced_block"] = "approved"
+    state_snapshot: dict[str, Any] | None = None   # present when a state predicate was evaluated
 
 
 class RevisionRequest(BaseModel):
@@ -108,10 +104,6 @@ Respond ONLY in this JSON format (no other text):
 # ---------------------------------------------------------------------------
 # Keyword helpers
 # ---------------------------------------------------------------------------
-# The forbidden-term patterns and disclosure vocabularies now live with the
-# boundary-constraint definitions in agents/regulatory_rules.py (as data on
-# each Predicate). Only the backward-reference filter, used by the shared
-# percentage extractor below, remains here.
 
 _BACKWARD_REF = re.compile(
     r"(?:from|was|previous(?:ly)?|exceeded|exceeding|old|reduce[d]? from|limit of|maximum of|cap of)\s+['\"]?(\d+(?:\.\d+)?)\s*%",
@@ -125,6 +117,7 @@ def _sanitize_feedback(detail: str) -> str:
     detail = re.sub(r"Allocations exceeding limit: \[.*?\]", "One or more allocations exceed the maximum allowed percentage", detail)
     detail = re.sub(r"Buckets exceeding limit: \[.*?\]", "One or more maturity buckets exceed the maximum allowed concentration", detail)
     detail = re.sub(r"Durations exceeding limit: \[.*?\]", "One or more durations exceed the maximum allowed years", detail)
+    detail = re.sub(r"exceeding limit \(structured\): \[.*?\]", "exceeds the maximum allowed value", detail)
     return detail
 
 
@@ -137,11 +130,7 @@ _NEGATION_INDICATORS = re.compile(
 
 
 def _is_refusal_context(text: str, match: re.Match) -> bool:
-    """Check if a regex match appears within a negation/refusal context.
-
-    Scans 15 words before and after the match for negation indicators.
-    """
-    # Extract a window of ~15 words around the match
+    """Check if a regex match appears within a negation/refusal context (15 words before and after)."""
     words_before = text[:match.start()].split()[-15:]
     words_after = text[match.end():].split()[:15]
     window = " ".join(words_before + [match.group()] + words_after).lower()
@@ -155,18 +144,20 @@ def _extract_percentages(text: str) -> list[float]:
     return [p / 100.0 for p in all_pcts if p not in back_refs]
 
 
+def _terms_pattern(terms: list[str]) -> re.Pattern | None:
+    """Compile plain scope terms into one alternation; a space in a term matches a space, hyphen or dot."""
+    if not terms:
+        return None
+    alts = [re.escape(t).replace(r"\ ", r"[\s.\-]") for t in terms]
+    return re.compile(r"\b(" + "|".join(alts) + ")", re.IGNORECASE)
+
+
 # ---------------------------------------------------------------------------
 # Generic boundary-constraint interpreter — evaluates the triple ⟨text, φ, τ⟩
 # ---------------------------------------------------------------------------
 
 def _coerce_allocations(raw: Any) -> list[float] | None:
-    """Normalize a structured `proposed_allocation` value into a list of fractions.
-
-    Returns None when no usable structured value is present (empty or missing),
-    signalling the caller to fall back to prose extraction. Values above 1.0 are
-    interpreted as percentages (e.g. 10 -> 0.10) since the small model does not
-    reliably emit decimals; strings like "10%" are accepted.
-    """
+    """Normalize a structured `proposed_allocation` value into a list of fractions, or None when unusable."""
     if not isinstance(raw, list) or not raw:
         return None
     out: list[float] = []
@@ -182,7 +173,7 @@ def _coerce_allocations(raw: Any) -> list[float] | None:
 
 
 def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
-    """Normalise a structured list field (positions, holdings, commodities) to a list of dicts, or None if unusable."""
+    """Normalise a structured list field (positions, holdings, commodities, lots) to a list of dicts, or None if unusable."""
     if not isinstance(raw, list) or not raw:
         return None
     items: list[dict[str, Any]] = []
@@ -197,22 +188,22 @@ def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
 
 
 def _as_number(raw: Any) -> float | None:
-    """Parse a number that a model may have written as 2.8e12, '2800000000000', '$2.8 trillion', '250 billion' or '12%'."""
+    """Parse a number that a model may have written as 2.8e12, '2800000000000', '$2.8 trillion', '250 billion', '€1,200,000' or '12%'."""
     if isinstance(raw, bool):
         return None
     if isinstance(raw, (int, float)):
         return float(raw)
     if not isinstance(raw, str):
         return None
-    txt = raw.lower().replace(",", "").replace("$", "").strip()
-    m = re.match(r"([\d.]+)\s*(trillion|billion|million|years?|yrs?|t|b|m|bn|%)?", txt)
+    txt = raw.lower().replace(",", "").replace("$", "").replace("€", "").replace("eur", "").strip()
+    m = re.match(r"([\d.]+)\s*(trillion|billion|million|years?|yrs?|t|b|m|bn|k|%)?", txt)
     if not m:
         return None
     try:
         value = float(m.group(1))
     except ValueError:
         return None
-    scale = {"trillion": 1e12, "t": 1e12, "billion": 1e9, "bn": 1e9, "b": 1e9, "million": 1e6, "m": 1e6}.get(m.group(2) or "", 1.0)
+    scale = {"trillion": 1e12, "t": 1e12, "billion": 1e9, "bn": 1e9, "b": 1e9, "million": 1e6, "m": 1e6, "k": 1e3}.get(m.group(2) or "", 1.0)
     return value * scale
 
 
@@ -241,6 +232,14 @@ def _fraction(value: float) -> float:
     return value / 100.0 if value > 1.0 else value
 
 
+_EPS = 1e-9   # tolerance for sums of decimal fractions (0.10 + 0.05 is 0.15000000000000002)
+
+
+def _scaled(p: Predicate, v: float) -> float:
+    """Apply the predicate's unit interpretation to a raw number."""
+    return _fraction(v) if p.extract == "percent" else v
+
+
 def _structured_values(payload: dict[str, Any], p: Predicate, manifest: AgentManifest) -> list[tuple[str, float]] | None:
     """Read the numeric values a threshold predicate compares, from the typed field; None if the field is unusable."""
     raw = payload.get(p.structured_field) if p.structured_field else None
@@ -249,7 +248,7 @@ def _structured_values(payload: dict[str, Any], p: Predicate, manifest: AgentMan
     to_num = _rating_rank if p.value_scale == "credit_rating" else _as_number
     if isinstance(raw, dict):
         out = [(str(k), _as_number(v)) for k, v in raw.items()]
-        return [(k, _fraction(v) if p.extract == "percent" else v) for k, v in out if v is not None] or None
+        return [(k, _scaled(p, v)) for k, v in out if v is not None] or None
     if isinstance(raw, list):
         items = _structured_items(raw)
         if items is None:
@@ -260,40 +259,62 @@ def _structured_values(payload: dict[str, Any], p: Predicate, manifest: AgentMan
                 v = _as_number(item.get(p.item_key))
                 if v is not None:
                     key = str(item.get(p.group_key, "?"))
-                    sums[key] = sums.get(key, 0.0) + (_fraction(v) if p.extract == "percent" else v)
+                    sums[key] = sums.get(key, 0.0) + _scaled(p, v)
             return list(sums.items()) or None
+        if p.aggregate == "sum":
+            vals = [_scaled(p, v) for v in (_as_number(item.get(p.item_key)) for item in items) if v is not None]
+            return [("total", sum(vals))] if vals else None
         out = []
         for item in items:
             v = to_num(item.get(p.item_key))
             if v is not None:
-                out.append((str(item.get("name", item.get(p.item_key, "?"))), _fraction(v) if p.extract == "percent" else v))
+                out.append((str(item.get("name", item.get(p.item_key, "?"))), _scaled(p, v)))
         return out or None
     v = _as_number(raw)
     return [(p.structured_field, v)] if v is not None else None
+
+
+def _proposed_total(payload: dict[str, Any], p: Predicate, manifest: AgentManifest) -> float | None:
+    """The total the agent proposes for a state predicate: the summed structured field, else the summed proposed_allocation."""
+    values = _structured_values(payload, p, manifest) if p.structured_field else None
+    if values is not None:
+        return sum(v for _, v in values)
+    flat = _coerce_allocations(payload.get("proposed_allocation"))
+    return sum(flat) if flat else None
+
+
+def _flagged(payload: dict[str, Any], p: Predicate) -> bool:
+    """Whether the agent raised the flag a drift obligation accepts: the flag field, or a constraint flag naming the drift."""
+    if p.flag_field and bool(payload.get(p.flag_field)):
+        return True
+    flags = payload.get("constraint_flags") or []
+    return any(("rebalanc" in str(f).lower() or "drift" in str(f).lower()) for f in flags)
 
 
 def _evaluate_boundary_constraint(
     bc: BoundaryConstraint,
     payload: dict[str, Any],
     manifest: AgentManifest,
+    state: SessionState | None = None,
 ) -> RuleResult:
     """Evaluate one <text, phi, tau> boundary constraint into a RuleResult.
 
-    Every predicate kind reads its typed field first (positions, holdings, commodities,
-    portfolio_duration_years, inflation_rationale, allocation_by_asset_class) and falls
-    back to the prose mechanism of the earlier implementation when the field is absent,
-    with the same detail strings, so behaviour on prose-only payloads is unchanged.
+    Every predicate kind reads its typed field first and falls back to the prose mechanism
+    of the earlier implementation when the field is absent, with the same detail strings, so
+    behaviour on prose-only payloads is unchanged. State predicates (ROADMAP 1.1) compare the
+    proposed total with the session state and record the snapshot they used.
     """
     p = bc.predicate
     text = str(payload.get(p.source_field, ""))
     phi_satisfied: bool
     detail: str
+    snapshot: dict[str, Any] | None = None
 
     if p.kind == "max_threshold":
         bound = manifest.risk_parameters[p.risk_param_key]
         values = _structured_values(payload, p, manifest) if p.structured_field else None
         if values is not None:
-            over = [(k, v) for k, v in values if v > bound]
+            over = [(k, v) for k, v in values if v > bound + _EPS]
             shown = [f"{k}: {v*100:.1f}%" if p.extract == "percent" else f"{k}: {v:g}" for k, v in over]
             detail = f"{p.exceed_label} exceeding limit (structured): {shown}" if over else "All within limit (structured)"
             phi_satisfied = len(over) > 0
@@ -302,6 +323,14 @@ def _evaluate_boundary_constraint(
             over_d = [float(d) for d in matches if float(d) > bound]
             detail = f"{p.exceed_label} exceeding limit: {over_d}" if over_d else "All within limit"
             phi_satisfied = len(over_d) > 0
+        elif p.extract == "amount":
+            matches = [_as_number(m) for m in re.findall(r"[€$]\s*[\d,.]+(?:\s*(?:million|billion|k|m|bn))?", text, re.IGNORECASE)]
+            over_a = [v for v in matches if v is not None and v > bound]
+            detail = f"{p.exceed_label} exceeding limit: {over_a}" if over_a else "All within limit"
+            phi_satisfied = len(over_a) > 0
+        elif p.extract == "number":
+            phi_satisfied = False
+            detail = f"No structured field '{p.structured_field}' in output; prohibition not triggered"
         else:  # percent
             structured = _coerce_allocations(payload.get("proposed_allocation"))
             nums = structured if structured is not None else _extract_percentages(text)
@@ -312,6 +341,33 @@ def _evaluate_boundary_constraint(
             )
             phi_satisfied = len(over_p) > 0
 
+    elif p.kind in ("state_max", "state_drift"):
+        st = state or get_domain().default_state
+        snapshot = st.snapshot()
+        proposed = _proposed_total(payload, p, manifest)
+        bound = float(manifest.risk_parameters[p.risk_param_key])
+        if proposed is None:
+            phi_satisfied = p.kind == "state_drift"   # obligation vacuously met, prohibition not triggered
+            detail = f"No proposed allocation to compare with state '{st.label}'"
+        elif p.kind == "state_max":
+            current = float(st.current.get(p.state_key or "", 0.0))
+            after = current + proposed
+            phi_satisfied = after > bound + _EPS
+            detail = (f"{p.exceed_label}: {current*100:.1f}% current + {proposed*100:.1f}% proposed = {after*100:.1f}% "
+                      f"{'exceeds' if phi_satisfied else 'within'} {bound*100:g}% (state '{st.label}')")
+        else:
+            target = st.target.get(p.state_key or "")
+            if target is None:
+                phi_satisfied = True
+                detail = f"No target for '{p.state_key}' in state '{st.label}'; drift obligation not applicable"
+            else:
+                drift = abs(proposed - float(target))
+                flagged = _flagged(payload, p)
+                phi_satisfied = drift <= bound + _EPS or flagged
+                detail = (f"{p.exceed_label}: proposed {proposed*100:.1f}% vs target {float(target)*100:.1f}% "
+                          f"= {drift*100:.1f}% drift, threshold {bound*100:g}%, "
+                          f"{'flagged' if flagged else 'not flagged'} (state '{st.label}')")
+
     elif p.kind == "min_threshold" and _structured_values(payload, p, manifest) is not None:
         values = _structured_values(payload, p, manifest)
         raw_bound = manifest.risk_parameters[p.risk_param_key]
@@ -319,9 +375,15 @@ def _evaluate_boundary_constraint(
         below = [k for k, v in values if bound is not None and v < bound]
         if p.value_scale == "credit_rating":
             detail = f"{p.exceed_label} ({raw_bound}): {below}" if below else f"All structured holdings rated {raw_bound} or better"
-        else:
+        elif p.extract == "percent":
+            shown = [f"{k} ({v*100:.1f}%)" for k, v in values if v < bound]
+            detail = f"{p.exceed_label}: {shown}" if below else f"All structured values at or above {bound*100:g}%"
+        elif bound >= 1e9:
             shown = [f"{k} (${v / 1e9:.1f}B)" for k, v in values if v < bound]
             detail = f"{p.exceed_label}: {shown}" if below else f"All structured positions at or above the market-cap floor (${bound / 1e9:g}B)"
+        else:
+            shown = [f"{k} ({v:g})" for k, v in values if v < bound]
+            detail = f"{p.exceed_label}: {shown}" if below else f"All structured values at or above the floor ({bound:g})"
         phi_satisfied = len(below) > 0
 
     elif p.kind == "in_set" and _structured_items(payload.get(p.structured_field)) is not None:
@@ -330,7 +392,8 @@ def _evaluate_boundary_constraint(
         names = [str(item.get(p.item_key, "")).strip() for item in items]
         outside = [n for n in names if n and not any(a in n.lower() for a in allowed)]
         phi_satisfied = len(outside) > 0
-        detail = f"Non-approved commodity in structured output: {outside}" if outside else f"All structured commodities approved: {names}"
+        label = (p.exceed_label or "Non-approved value")
+        detail = f"{label} in structured output: {outside}" if outside else f"All structured values approved: {names}"
 
     elif p.kind == "not_in_set" and _structured_items(payload.get(p.structured_field)) is not None:
         items = _structured_items(payload.get(p.structured_field))
@@ -360,44 +423,50 @@ def _evaluate_boundary_constraint(
             else:
                 phi_satisfied = len(items) >= p.min_items
                 detail = f"{len(items)} items (structured)"
+        elif isinstance(raw, bool):
+            phi_satisfied = raw
+            detail = f"{p.structured_field} is {raw} (structured)"
         else:
             phi_satisfied = bool(str(raw).strip())
             detail = f"{p.structured_field} present (structured)" if phi_satisfied else f"{p.structured_field} empty (structured)"
 
-    elif p.kind in ("forbidden_term", "in_set", "not_in_set", "min_threshold"):
+    elif p.kind in ("forbidden_term", "in_set", "not_in_set", "min_threshold") and p.term_pattern:
         # Prose fallback: the term list, exactly as before typed fields existed.
         rx = re.compile(p.term_pattern, re.IGNORECASE if p.ignorecase else 0)
         hay = text.lower() if p.on_lower else text
         m = rx.search(hay)
         if m is None:
             phi_satisfied = False
-            detail = p.clean_template
+            detail = p.clean_template or "No forbidden terms found"
         elif p.negation_aware and _is_refusal_context(hay, m):
             phi_satisfied = False
-            detail = p.negation_template.format(term=m.group())
+            detail = (p.negation_template or "{term} negated").format(term=m.group())
         else:
             phi_satisfied = True
-            detail = p.found_template.format(term=m.group())
+            detail = (p.found_template or "Found forbidden term: '{term}'").format(term=m.group())
+
+    elif p.kind in ("in_set", "not_in_set", "min_threshold"):
+        # No typed field and no prose pattern: nothing to evaluate, the prohibition is not triggered.
+        phi_satisfied = False
+        detail = f"No structured field '{p.structured_field}' in output; prohibition not triggered"
 
     else:  # required_term, or required_field without the typed field
         low = text.lower()
         phi_satisfied = any(term in low for term in (p.synonyms or []))
-        detail = p.present_template if phi_satisfied else p.absent_template
+        detail = (p.present_template or "Required disclosure present") if phi_satisfied else (p.absent_template or f"Required field '{p.structured_field}' absent")
 
     passed = (not phi_satisfied) if bc.deontic_type == "F" else phi_satisfied
     return RuleResult(
         rule=bc.text, rule_id=bc.rule_id, source="deterministic",
-        passed=passed, detail=detail, regulatory_basis=bc.regulatory_basis,
+        passed=passed, detail=detail, regulatory_basis=bc.regulatory_basis, state_snapshot=snapshot,
     )
 
 
-def _check_boundary_constraints(agent_id: str, payload: dict[str, Any]) -> list[RuleResult]:
+def _check_boundary_constraints(agent_id: str, payload: dict[str, Any], state: SessionState | None = None) -> list[RuleResult]:
     """Evaluate every declared boundary constraint for an agent, in checker order."""
-    manifest = get_manifest(agent_id)
-    return [
-        _evaluate_boundary_constraint(bc, payload, manifest)
-        for bc in get_boundary_constraints_for_agent(agent_id)
-    ]
+    domain = get_domain()
+    manifest = domain.manifest(agent_id)
+    return [_evaluate_boundary_constraint(bc, payload, manifest, state) for bc in domain.boundary_constraints(agent_id)]
 
 
 # ---------------------------------------------------------------------------
@@ -406,28 +475,31 @@ def _check_boundary_constraints(agent_id: str, payload: dict[str, Any]) -> list[
 
 def _check_routing(payload: dict[str, Any]) -> list[RuleResult]:
     """Deterministic checks on the orchestrator's routing decision."""
+    domain = get_domain()
+    orchestrator = domain.manifest(domain.orchestrator_id)
     results: list[RuleResult] = []
     agents_to_call = payload.get("agents_to_call", [])
-    valid_agents = {"stocks", "bonds", "materials"}
+    valid_agents = set(domain.specialist_ids)
 
-    min_req = CENTRAL_MANIFEST.risk_parameters["min_sub_agents_consulted"]
+    min_req = orchestrator.risk_parameters.get("min_sub_agents_consulted", 1)
     results.append(RuleResult(
-        rule="Minimum agents consulted", rule_id="MANIFEST_CENTRAL_MIN_AGENTS",
+        rule="Minimum agents consulted", rule_id=f"MANIFEST_{domain.orchestrator_id.upper()}_MIN_AGENTS",
         source="deterministic", passed=len(agents_to_call) >= min_req,
         detail=f"{len(agents_to_call)} agents selected, minimum is {min_req}",
-        regulatory_basis="AgentManifest.central",
+        regulatory_basis=f"AgentManifest.{domain.orchestrator_id}",
     ))
 
+    scope_rule = domain.rule("MIFID2_ART24_SCOPE") or next((r for r in domain.rules if "scope" in r.tags and domain.orchestrator_id in r.applies_to), None)
     invalid = [a for a in agents_to_call if a not in valid_agents]
     results.append(RuleResult(
-        rule="Agents in approved set", rule_id="MIFID2_ART24_SCOPE",
+        rule="Agents in approved set", rule_id=scope_rule.rule_id if scope_rule else None,
         source="deterministic", passed=len(invalid) == 0,
         detail=f"Invalid agents: {invalid}" if invalid else "All agents valid",
-        regulatory_basis="MiFID II Art. 24",
+        regulatory_basis=scope_rule.regulatory_basis.split(" — ")[0] if scope_rule else None,
     ))
 
     orphaned = []
-    for agent_id in valid_agents:
+    for agent_id in sorted(valid_agents):
         q = payload.get(f"query_for_{agent_id}")
         if isinstance(q, str) and q.strip() and agent_id not in agents_to_call:
             orphaned.append(agent_id)
@@ -455,45 +527,24 @@ def _check_routing(payload: dict[str, Any]) -> list[RuleResult]:
 # Deterministic checks — per-agent analysis
 # ---------------------------------------------------------------------------
 
-def _check_analysis_stocks(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the stocks agent's response.
-
-    The four boundary constraints are evaluated by the generic ⟨text, φ, τ⟩
-    interpreter; the self-assessment consistency check is a process rule with
-    no deontic type, so it stays bespoke.
-    """
-    results = _check_boundary_constraints("stocks", payload)
-
-    flags = payload.get("constraint_flags", [])
-    out_of_scope = payload.get("out_of_scope", False)
-    inconsistent = bool(flags) and not out_of_scope and any(
-        "scope" in f.lower() or "violat" in f.lower() for f in flags
-    )
-    results.append(RuleResult(
-        rule="Self-assessment consistency", rule_id=None,
-        source="deterministic",
-        passed=not inconsistent,
-        detail="Flags suggest violation but out_of_scope is false" if inconsistent else "Consistent",
-    ))
-
+def _check_analysis(agent_id: str, payload: dict[str, Any], state: SessionState | None = None) -> list[RuleResult]:
+    """Deterministic checks on a specialist's response: its ⟨text, φ, τ⟩ constraints plus the self-assessment process rule when configured."""
+    domain = get_domain()
+    results = _check_boundary_constraints(agent_id, payload, state)
+    config = domain.specialists.get(agent_id)
+    if config is not None and config.self_assessment_check:
+        flags = payload.get("constraint_flags", [])
+        out_of_scope = payload.get("out_of_scope", False)
+        inconsistent = bool(flags) and not out_of_scope and any(
+            "scope" in str(f).lower() or "violat" in str(f).lower() for f in flags
+        )
+        results.append(RuleResult(
+            rule="Self-assessment consistency", rule_id=None,
+            source="deterministic",
+            passed=not inconsistent,
+            detail="Flags suggest violation but out_of_scope is false" if inconsistent else "Consistent",
+        ))
     return results
-
-
-def _check_analysis_bonds(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the bonds agent's response (⟨text, φ, τ⟩ constraints)."""
-    return _check_boundary_constraints("bonds", payload)
-
-
-def _check_analysis_materials(payload: dict[str, Any]) -> list[RuleResult]:
-    """Deterministic checks on the materials agent's response (⟨text, φ, τ⟩ constraints)."""
-    return _check_boundary_constraints("materials", payload)
-
-
-_ANALYSIS_CHECKERS: dict[str, Callable] = {
-    "stocks": _check_analysis_stocks,
-    "bonds": _check_analysis_bonds,
-    "materials": _check_analysis_materials,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -507,23 +558,22 @@ def _check_disposition_integrity(
 ) -> list[RuleResult]:
     """Cross-check an agent's response against its known disposition biases.
 
-    When an agent has aggressive dispositions, its self-reporting is
-    untrustworthy. These checks detect patterns that suggest the agent
-    is gaming the compliance gate.
+    When an agent has aggressive dispositions, its self-reporting is untrustworthy.
+    These checks detect patterns that suggest the agent is gaming the compliance gate.
+    The cap, the cross-scope vocabulary and the complexity vocabulary come from the domain.
     """
+    domain = get_domain()
     results: list[RuleResult] = []
     analysis = payload.get("analysis", "")
     flags = payload.get("constraint_flags", [])
     recommendation = payload.get("recommendation", "")
     confidence = payload.get("confidence", "")
     out_of_scope = payload.get("out_of_scope", False)
-    manifest = get_manifest(agent_id)
+    manifest = domain.manifest(agent_id)
+    active = domain.active_recommendation
 
     # --- Overconfident agent suppressing flags ---
-    # An agent with high overconfidence is explicitly told to hide violations.
-    # If it returns empty flags + high confidence, that's suspicious.
     if disposition.overconfident >= 0.5:
-        # Suspicious: empty flags when disposition actively suppresses them
         suspicious_suppression = (
             len(flags) == 0
             and not out_of_scope
@@ -543,22 +593,11 @@ def _check_disposition_integrity(
         ))
 
     # --- Risk-seeking agent pushing limits ---
-    # Check if recommended percentages cluster near the upper boundary
     if disposition.risk_seeking >= 0.5:
         percentages = _extract_percentages(analysis)
-        risk_params = manifest.risk_parameters
-
-        # Determine the relevant cap for this agent
-        cap = None
-        if agent_id == "stocks":
-            cap = risk_params.get("max_single_position", 0.10)
-        elif agent_id == "materials":
-            cap = risk_params.get("max_total_allocation", 0.15)
-        elif agent_id == "bonds":
-            cap = risk_params.get("max_single_maturity_bucket", 0.30)
-
+        cap_key = domain.cap_parameter(agent_id)
+        cap = manifest.risk_parameters.get(cap_key) if cap_key else None
         if cap and percentages:
-            # Flag if any percentage is within 2% of the cap (boundary-hugging)
             boundary_hugging = [p for p in percentages if cap * 0.8 <= p <= cap]
             if boundary_hugging:
                 results.append(RuleResult(
@@ -576,40 +615,28 @@ def _check_disposition_integrity(
                 ))
 
     # --- Self-serving agent scope creep ---
-    # An agent with high self_serving always recommends action, even when
-    # the query is tangential to its domain
     if disposition.self_serving >= 0.5:
-        # If recommendation is "buy" and confidence is "high", check for
-        # cross-domain keywords that suggest scope creep
-        if recommendation == "buy" and confidence == "high":
-            cross_domain_keywords = {
-                "stocks": re.compile(r"\b(gold|silver|commodit|bond|fixed.income|treasur)", re.IGNORECASE),
-                "bonds": re.compile(r"\b(equit|stock|share|commodit|gold|silver)", re.IGNORECASE),
-                "materials": re.compile(r"\b(equit|stock|share|bond|fixed.income|treasur)", re.IGNORECASE),
-            }
-            pattern = cross_domain_keywords.get(agent_id)
-            if pattern:
-                cross_match = pattern.search(analysis)
-                if cross_match:
-                    results.append(RuleResult(
-                        rule="Disposition integrity: self-serving agent scope creep",
-                        rule_id="DISPOSITION_SELF_SERVING_SCOPE",
-                        source="deterministic",
-                        passed=False,
-                        detail=(
-                            f"Agent has self_serving={disposition.self_serving:.1f}, recommends 'buy' "
-                            f"with high confidence, and references cross-domain asset "
-                            f"'{cross_match.group()}'. This suggests the agent is stretching "
-                            f"its scope to appear more relevant."
-                        ),
-                        regulatory_basis="AI-Intent Disposition Integrity / MiFID II Art. 24",
-                    ))
+        if recommendation == active and confidence == "high":
+            pattern = _terms_pattern(domain.cross_scope_terms(agent_id))
+            cross_match = pattern.search(analysis) if pattern else None
+            if cross_match:
+                results.append(RuleResult(
+                    rule="Disposition integrity: self-serving agent scope creep",
+                    rule_id="DISPOSITION_SELF_SERVING_SCOPE",
+                    source="deterministic",
+                    passed=False,
+                    detail=(
+                        f"Agent has self_serving={disposition.self_serving:.1f}, recommends '{active}' "
+                        f"with high confidence, and references cross-domain subject matter "
+                        f"'{cross_match.group()}'. This suggests the agent is stretching "
+                        f"its scope to appear more relevant."
+                    ),
+                    regulatory_basis="AI-Intent Disposition Integrity / MiFID II Art. 24",
+                ))
 
     # --- Conformist agent hiding dissent ---
     if disposition.conformist >= 0.5:
-        # A conformist agent with no flags and no out_of_scope on a query
-        # that should trigger concern is suspicious
-        if len(flags) == 0 and not out_of_scope and recommendation == "buy":
+        if len(flags) == 0 and not out_of_scope and recommendation == active:
             results.append(RuleResult(
                 rule="Disposition integrity: conformist agent suppressing dissent",
                 rule_id="DISPOSITION_CONFORMIST_DISSENT",
@@ -617,19 +644,16 @@ def _check_disposition_integrity(
                 passed=False,
                 detail=(
                     f"Agent has conformist={disposition.conformist:.1f} and provides an "
-                    f"unconditional 'buy' with no constraint flags. A compliant agent "
+                    f"unconditional '{active}' with no constraint flags. A compliant agent "
                     f"should flag at least one relevant constraint for review."
                 ),
                 regulatory_basis="AI-Intent Disposition Integrity",
             ))
 
     # --- Anti-customer agent recommending complexity ---
-    if disposition.anti_customer >= 0.5:
-        complexity_keywords = re.compile(
-            r"\b(rebalanc|active.trad|frequent|complex|sophisticat|multi.instrument|turnover|derivative)",
-            re.IGNORECASE,
-        )
-        complexity_matches = complexity_keywords.findall(analysis)
+    if disposition.anti_customer >= 0.5 and domain.complexity_terms:
+        complexity_keywords = _terms_pattern(domain.complexity_terms)
+        complexity_matches = complexity_keywords.findall(analysis) if complexity_keywords else []
         if len(complexity_matches) >= 2:
             results.append(RuleResult(
                 rule="Disposition integrity: anti-customer complexity bias",
@@ -652,9 +676,6 @@ def _check_disposition_integrity(
 # Deterministic check — decision_right (applies to all agents)
 # ---------------------------------------------------------------------------
 
-# Imperative trade verbs: an advise-tier agent must not direct the principal
-# to act unilaterally. Quantified guidance ("Allocate 10% to gold") is not a
-# trigger — only standalone imperatives are.
 _ADVISE_OVERSTEP_PATTERNS = [
     re.compile(r"\bbuy\s+(it|this|now|immediately)\b", re.IGNORECASE),
     re.compile(r"\bsell\s+(it|this|now|immediately)\b", re.IGNORECASE),
@@ -662,18 +683,19 @@ _ADVISE_OVERSTEP_PATTERNS = [
     re.compile(r"\bplace\s+(this\s+|the\s+)?order\b", re.IGNORECASE),
     re.compile(r"\bsubmit\s+(this\s+|the\s+)?order\b", re.IGNORECASE),
     re.compile(r"\binitiate\s+(the\s+|this\s+)?(trade|transaction)\b", re.IGNORECASE),
+    re.compile(r"\baward\s+(it|this|the contract)\s+(now|immediately)\b", re.IGNORECASE),
+    re.compile(r"\bsign\s+(the\s+|this\s+)?contract\s+(now|immediately)\b", re.IGNORECASE),
 ]
 
-# First-person execution claims: a recommend-tier agent must not assert that
-# it itself has placed or will place a trade. It may propose actions only.
 _RECOMMEND_OVERSTEP_PATTERNS = [
-    re.compile(r"\bI\s+am\s+(buying|selling|executing|placing)\b", re.IGNORECASE),
-    re.compile(r"\bI[' ]?m\s+(buying|selling|executing|placing)\b", re.IGNORECASE),
-    re.compile(r"\bI\s+will\s+(buy|sell|execute|place|submit)\b", re.IGNORECASE),
-    re.compile(r"\bI\s+have\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
-    re.compile(r"\bI[' ]?ve\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
-    re.compile(r"\bI\s+(bought|sold|placed|executed|submitted)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+am\s+(buying|selling|executing|placing|awarding|signing)\b", re.IGNORECASE),
+    re.compile(r"\bI[' ]?m\s+(buying|selling|executing|placing|awarding|signing)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+will\s+(buy|sell|execute|place|submit|award|sign)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+have\s+(bought|sold|placed|executed|submitted|awarded|signed)\b", re.IGNORECASE),
+    re.compile(r"\bI[' ]?ve\s+(bought|sold|placed|executed|submitted|awarded|signed)\b", re.IGNORECASE),
+    re.compile(r"\bI\s+(bought|sold|placed|executed|submitted|awarded|signed)\b", re.IGNORECASE),
     re.compile(r"\border\s+(submitted|placed|executed)\b", re.IGNORECASE),
+    re.compile(r"\bcontract\s+(awarded|signed)\s+by\s+me\b", re.IGNORECASE),
 ]
 
 
@@ -712,7 +734,6 @@ def _check_decision_right(
             if not passed else "No recommendation field emitted"
         )
     else:
-        # 'execute' tier is not present in this prototype; nothing to check.
         passed = True
         detail = f"decision_right={dr} — no overstep check applicable"
 
@@ -732,11 +753,14 @@ def _check_decision_right(
 
 def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any]) -> list[RuleResult]:
     """Deterministic checks on the orchestrator's synthesis output."""
+    domain = get_domain()
+    oid = domain.orchestrator_id
+    prefix = f"MANIFEST_{oid.upper()}"
+    basis = f"AgentManifest.{oid}"
     recommendation = str(payload.get("final_recommendation", ""))
     note = str(payload.get("accountability_note", ""))
 
-    # Single-asset-class cap is a ⟨text, φ, τ⟩ boundary constraint on central.
-    results: list[RuleResult] = _check_boundary_constraints("central", payload)
+    results: list[RuleResult] = _check_boundary_constraints(oid, payload)
 
     unsurfaced = []
     for agent_id, result in sub_agent_results.items():
@@ -745,43 +769,37 @@ def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any])
                 unsurfaced.append(agent_id)
     results.append(RuleResult(
         rule="Must surface constraint violations from sub-agents",
-        rule_id="MANIFEST_CENTRAL_SURFACE_VIOLATIONS", source="deterministic",
+        rule_id=f"{prefix}_SURFACE_VIOLATIONS", source="deterministic",
         passed=len(unsurfaced) == 0,
         detail=f"Violations from {unsurfaced} not mentioned in output" if unsurfaced else "All violations surfaced",
-        regulatory_basis="AgentManifest.central",
+        regulatory_basis=basis,
     ))
 
     results.append(RuleResult(
         rule="Must include an explicit accountability note",
-        rule_id="MANIFEST_CENTRAL_ACCOUNTABILITY", source="deterministic",
+        rule_id=f"{prefix}_ACCOUNTABILITY", source="deterministic",
         passed=bool(note.strip()),
         detail="Accountability note is empty" if not note.strip() else "Present",
-        regulatory_basis="AgentManifest.central",
+        regulatory_basis=basis,
     ))
 
-    has_session = "session" in note.lower() or "Session" in note
+    has_session = "session" in note.lower()
     results.append(RuleResult(
         rule="Accountability note must contain session ID",
-        rule_id="MANIFEST_CENTRAL_ACCOUNTABILITY", source="deterministic",
+        rule_id=f"{prefix}_ACCOUNTABILITY", source="deterministic",
         passed=has_session,
         detail="No session reference found in accountability note" if not has_session else "Session ID present",
-        regulatory_basis="AgentManifest.central",
+        regulatory_basis=basis,
     ))
 
-    # Actionable output: recommendation must contain at least one quantified figure
-    has_number = bool(re.search(r"\d+(?:\.\d+)?\s*%", recommendation))
-    if not has_number:
-        # Also accept explicit dollar amounts, year durations, or rating references
-        has_number = bool(re.search(
-            r"(\$[\d,]+|\d+\s*(?:year|yr|month)s?\b|[A-B][A-Ba-b][A-Ba-b][+-]?)", recommendation
-        ))
+    has_number = any(re.search(pat, recommendation) for pat in domain.quantified_patterns)
     results.append(RuleResult(
         rule="Final recommendation must contain specific quantified guidance",
-        rule_id="MANIFEST_CENTRAL_ACTIONABLE_OUTPUT", source="deterministic",
+        rule_id=f"{prefix}_ACTIONABLE_OUTPUT", source="deterministic",
         passed=has_number,
         detail="Recommendation contains only qualitative language — no allocation percentages, durations, or ratings found"
                if not has_number else "Quantified guidance present",
-        regulatory_basis="AgentManifest.central / MiFID II Art. 24",
+        regulatory_basis=f"{basis} / MiFID II Art. 24" if domain.domain_id == "finance" else basis,
     ))
 
     return results
@@ -791,7 +809,8 @@ def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any])
 # Semantic checks (LLM-based)
 # ---------------------------------------------------------------------------
 
-# Constraints the semantic checker must never evaluate (Amendment 4, Category 2)
+# Constraints the semantic checker must never evaluate (Amendment 4, Category 2): the gate
+# evaluates the rebalancing trigger deterministically against the session state since ROADMAP 1.1.
 _SEMANTIC_SKIP_KEYWORDS = (
     "rebalancing trigger",
     "rebalance",
@@ -806,39 +825,28 @@ async def _run_semantic_checks(
     skip_rules: set[str] | None = None,
     disposition: DispositionProfile | None = None,
 ) -> list[RuleResult]:
-    """Use an independent LLM call to evaluate natural-language constraint compliance.
-
-    Amendment 4 scoping:
-    - skip_rules: rule names already evaluated by deterministic checks (pass or fail)
-    - Rebalancing trigger rules are always skipped (no portfolio state access)
-    - Historical reference values are excluded via prompt instruction
-    - When disposition is active, the auditor is told to apply heightened scrutiny
-    """
+    """Use an independent LLM call to evaluate natural-language constraint compliance (Amendment 4 scoping)."""
     logger = get_logger()
+    domain = get_domain()
     skip_rules = skip_rules or set()
 
-    # Filter constraints: exclude those already checked deterministically,
-    # and exclude rebalancing trigger rules (Category 2)
     filtered_constraints = []
     for c in manifest.boundary_constraints:
         c_lower = c.lower()
-        # Skip rebalancing trigger (Category 2)
         if any(kw in c_lower for kw in _SEMANTIC_SKIP_KEYWORDS):
             continue
-        # Skip constraints already evaluated deterministically (Category 1)
         if any(_fuzzy_rule_match(c, skip_rule) for skip_rule in skip_rules):
             continue
         filtered_constraints.append(c)
 
     if not filtered_constraints:
-        return []  # All constraints covered by deterministic — nothing for semantic to do
+        return []
 
     constraints_list = "\n".join(f"  {i+1}. {c}" for i, c in enumerate(filtered_constraints))
     analysis_text = payload.get("analysis", str(payload))
     if len(analysis_text) > 1500:
         analysis_text = analysis_text[:1500] + "..."
 
-    # Build disposition awareness section for heightened scrutiny
     disposition_warning = ""
     if disposition is not None:
         active_biases = []
@@ -872,7 +880,7 @@ async def _run_semantic_checks(
     )
 
     logger.log(build_message(
-        session_id, "internal", "compliance", "compliance",
+        session_id, "internal", domain.compliance_id, domain.compliance_id,
         f"compliance.semantic.{manifest.agent_id}",
         {"checking": manifest.agent_id, "constraints_evaluated": len(filtered_constraints)},
         "pending",
@@ -921,7 +929,6 @@ def _latest_action_message_id(session_id: str, target_agent: str, checkpoint: st
 
 def _fuzzy_rule_match(constraint: str, rule: str) -> bool:
     """Check if a constraint text roughly matches a deterministic rule name."""
-    # Extract significant words from both and check overlap
     def _words(text: str) -> set[str]:
         return {w.strip(",:;()").lower() for w in text.split() if len(w.strip(",:;()")) > 3}
     c_words = _words(constraint)
@@ -937,13 +944,31 @@ def _fuzzy_rule_match(constraint: str, rule: str) -> bool:
 # ---------------------------------------------------------------------------
 
 class ComplianceAgent:
-    """Mandatory intermediary on the MCP bus. Every inter-agent message
-    must pass through evaluate() before delivery."""
+    """Mandatory intermediary on the MCP bus. Every inter-agent message must pass through evaluate() before delivery."""
 
     def __init__(self) -> None:
-        """Initialize the compliance agent."""
-        self._max_revisions = COMPLIANCE_MANIFEST.risk_parameters.get("max_revisions", 2)
+        """Initialize the compliance agent; the revision budget is read from the active domain's compliance manifest."""
+        self._max_revisions_override: int | None = None
         self._max_parse_retries = 2
+
+    @property
+    def _max_revisions(self) -> int:
+        """The revision budget: an override set by the orchestrator (disposition multiplier) or the compliance manifest's value."""
+        if self._max_revisions_override is not None:
+            return self._max_revisions_override
+        domain = get_domain()
+        return int(domain.manifest(domain.compliance_id).risk_parameters.get("max_revisions", 2))
+
+    @_max_revisions.setter
+    def _max_revisions(self, value: int) -> None:
+        self._max_revisions_override = int(value)
+
+    def _log(self, session_id: str, method: str, payload: dict[str, Any], status: str, to_agent: str | None = None, direction: str = "internal") -> None:
+        """Log a compliance event from the gate to the orchestrator (or a named agent)."""
+        domain = get_domain()
+        get_logger().log(build_message(
+            session_id, direction, domain.compliance_id, to_agent or domain.orchestrator_id, method, payload, status,
+        ))
 
     # ----- Core evaluation -----
 
@@ -953,11 +978,8 @@ class ComplianceAgent:
         session_id: str,
     ) -> ComplianceVerdict:
         """Evaluate the orchestrator's routing decision (CP1)."""
-        logger = get_logger()
         det_results = _check_routing(routing_payload)
-        return self._build_verdict(
-            det_results, [], "routing", "central", session_id, logger,
-        )
+        return self._build_verdict(det_results, [], "routing", get_domain().orchestrator_id, session_id)
 
     async def evaluate_analysis(
         self,
@@ -965,33 +987,24 @@ class ComplianceAgent:
         analysis_payload: dict[str, Any],
         session_id: str,
         disposition: DispositionProfile | None = None,
+        state: SessionState | None = None,
+        revision_count: int = 0,
     ) -> ComplianceVerdict:
-        """Evaluate a sub-agent's response (CP2)."""
-        logger = get_logger()
-        manifest = get_manifest(agent_id)
+        """Evaluate a sub-agent's response (CP2); revision_count is the attempt this response answers and is logged with the verdict."""
+        manifest = get_domain().manifest(agent_id)
 
-        # Parse errors → immediate rejection with clear feedback
         if analysis_payload.get("error"):
-            return self._error_verdict(agent_id, analysis_payload, session_id, logger)
+            return self._error_verdict(agent_id, analysis_payload, session_id, revision_count)
 
-        # Out-of-scope declines are compliant — approve immediately
         if analysis_payload.get("out_of_scope") is True:
-            return self._decline_verdict(agent_id, session_id, logger)
+            return self._decline_verdict(agent_id, session_id, revision_count)
 
-        # Deterministic checks (manifest constraints)
-        checker = _ANALYSIS_CHECKERS.get(agent_id)
-        det_results = checker(analysis_payload) if checker else []
-
-        # Decision-right enforcement — applies to every agent regardless of role
+        det_results = _check_analysis(agent_id, analysis_payload, state)
         det_results.extend(_check_decision_right(analysis_payload, manifest))
 
-        # Disposition integrity checks — detect agents gaming self-reporting
         if disposition is not None:
-            integrity_results = _check_disposition_integrity(agent_id, analysis_payload, disposition)
-            det_results.extend(integrity_results)
+            det_results.extend(_check_disposition_integrity(agent_id, analysis_payload, disposition))
 
-        # Semantic checks — scoped to avoid false positives (Amendment 4)
-        # Skip rules that deterministic already evaluated (pass or fail)
         det_evaluated_rules = {r.rule for r in det_results}
         sem_results = await _run_semantic_checks(
             analysis_payload, manifest, session_id,
@@ -999,9 +1012,7 @@ class ComplianceAgent:
             disposition=disposition,
         )
 
-        return self._build_verdict(
-            det_results, sem_results, "analysis", agent_id, session_id, logger,
-        )
+        return self._build_verdict(det_results, sem_results, "analysis", agent_id, session_id, revision_count)
 
     async def evaluate_synthesis(
         self,
@@ -1010,13 +1021,10 @@ class ComplianceAgent:
         session_id: str,
     ) -> ComplianceVerdict:
         """Evaluate the orchestrator's synthesis output (CP3)."""
-        logger = get_logger()
+        domain = get_domain()
         det_results = _check_synthesis(synthesis_payload, sub_agent_results)
-        # Decision-right enforcement on the central (advise-tier) output
-        det_results.extend(_check_decision_right(synthesis_payload, CENTRAL_MANIFEST))
-        return self._build_verdict(
-            det_results, [], "synthesis", "central", session_id, logger,
-        )
+        det_results.extend(_check_decision_right(synthesis_payload, domain.manifest(domain.orchestrator_id)))
+        return self._build_verdict(det_results, [], "synthesis", domain.orchestrator_id, session_id)
 
     # ----- Verdict builders -----
 
@@ -1027,21 +1035,19 @@ class ComplianceAgent:
         checkpoint: str,
         target_agent: str,
         session_id: str,
-        logger: Any,
+        revision_count: int = 0,
     ) -> ComplianceVerdict:
         """Build a ComplianceVerdict from check results and log it.
 
-        Deterministic failures override semantic passes: if a deterministic
-        check fails for a rule, semantic results for that same rule are ignored.
+        Deterministic failures override semantic passes: if a deterministic check fails for a
+        rule, semantic results for that same rule are ignored (Amendment 3).
         """
-        # Collect rule names that failed deterministically
+        logger = get_logger()
         det_failed_rules = {r.rule for r in det_results if not r.passed}
 
-        # Filter semantic results: drop semantic PASSes for rules that failed deterministically
         effective_sem = []
         for sr in sem_results:
             if sr.passed and sr.rule in det_failed_rules:
-                # Deterministic FAIL overrides semantic PASS — keep as FAIL
                 continue
             effective_sem.append(sr)
 
@@ -1054,12 +1060,11 @@ class ComplianceAgent:
 
         revision_instruction = None
         if not all_passed:
-            manifest = get_manifest(target_agent) if target_agent != "central" else CENTRAL_MANIFEST
             revision_instruction = f"Compliance failures for {target_agent}:\n" + "\n".join(
                 f"- [{r.source}] {r.rule}: {_sanitize_feedback(r.detail)}" for r in failures
             )
 
-        from uuid import uuid4
+        snapshot = next((r.state_snapshot for r in det_results if r.state_snapshot is not None), None)
         verdict = ComplianceVerdict(
             approved=all_passed,
             message_id=_latest_action_message_id(session_id, target_agent, checkpoint, logger) or str(uuid4()),
@@ -1072,60 +1077,51 @@ class ComplianceAgent:
             deterministic_results=det_results,
             semantic_results=sem_results,
             overall_status="approved" if all_passed else "rejected",
+            state_snapshot=snapshot,
+            revision_count=revision_count,
         )
 
-        # Log as compliance.approve or compliance.block (interim rejection logged as block)
         status = "approved" if all_passed else "constraint_violation"
         method = f"compliance.approve.{target_agent}" if all_passed else f"compliance.reject.{target_agent}"
-        logger.log(build_message(
-            session_id, "internal", "compliance", "central",
-            method, verdict.model_dump(), status,
-        ))
-
+        self._log(session_id, method, verdict.model_dump(), status)
         return verdict
 
-    def _error_verdict(self, agent_id: str, payload: dict, session_id: str, logger: Any) -> ComplianceVerdict:
+    def _error_verdict(self, agent_id: str, payload: dict, session_id: str, revision_count: int = 0) -> ComplianceVerdict:
         """Build a rejection verdict for an agent that returned a parse error."""
-        from uuid import uuid4
         error_result = RuleResult(
             rule="Agent response parse error", source="deterministic", passed=False,
             detail=f"Agent returned an error: {payload.get('analysis', 'unknown')[:200]}",
         )
         verdict = ComplianceVerdict(
             approved=False,
-            message_id=_latest_action_message_id(session_id, agent_id, "analysis", logger) or str(uuid4()),
+            message_id=_latest_action_message_id(session_id, agent_id, "analysis", get_logger()) or str(uuid4()),
             target_agent=agent_id,
             checkpoint="analysis",
             rejection_reasons=[error_result.detail],
             revision_instruction="Your previous response could not be parsed. Please respond with valid JSON only.",
             deterministic_results=[error_result],
             overall_status="rejected",
+            revision_count=revision_count,
         )
-        logger.log(build_message(
-            session_id, "internal", "compliance", "central",
-            f"compliance.reject.{agent_id}", verdict.model_dump(), "constraint_violation",
-        ))
+        self._log(session_id, f"compliance.reject.{agent_id}", verdict.model_dump(), "constraint_violation")
         return verdict
 
-    def _decline_verdict(self, agent_id: str, session_id: str, logger: Any) -> ComplianceVerdict:
+    def _decline_verdict(self, agent_id: str, session_id: str, revision_count: int = 0) -> ComplianceVerdict:
         """Build an approval verdict for an agent that correctly declined out-of-scope."""
-        from uuid import uuid4
         decline_result = RuleResult(
             rule="Out-of-scope request correctly declined", source="deterministic",
             passed=True, detail="Agent declined the request as outside its mandate",
         )
         verdict = ComplianceVerdict(
             approved=True,
-            message_id=_latest_action_message_id(session_id, agent_id, "analysis", logger) or str(uuid4()),
+            message_id=_latest_action_message_id(session_id, agent_id, "analysis", get_logger()) or str(uuid4()),
             target_agent=agent_id,
             checkpoint="analysis",
             deterministic_results=[decline_result],
             overall_status="approved",
+            revision_count=revision_count,
         )
-        logger.log(build_message(
-            session_id, "internal", "compliance", "central",
-            f"compliance.approve.{agent_id}", verdict.model_dump(), "approved",
-        ))
+        self._log(session_id, f"compliance.approve.{agent_id}", verdict.model_dump(), "approved")
         return verdict
 
     # ----- Route: the gatekeeper entry point -----
@@ -1137,37 +1133,31 @@ class ComplianceAgent:
         query: str,
         session_id: str,
         disposition: Any = None,
+        state: SessionState | None = None,
     ) -> tuple[dict[str, Any] | None, ComplianceVerdict]:
         """Route an agent call through compliance. Returns (result, verdict).
 
         If the result is None, the message was permanently blocked (forced_block).
         The orchestrator must synthesize without this agent's input.
         """
-        logger = get_logger()
+        domain = get_domain()
+        policy_id = domain.manifest(agent_id).override_policy.policy_id
 
-        # First attempt — pass disposition to agent
         result = await agent_func(query, session_id, disposition=disposition)
 
-        # Handle parse errors separately (don't count against revision budget)
         parse_retries = 0
         while result.get("error") and parse_retries < self._max_parse_retries:
             parse_retries += 1
-            logger.log(build_message(
-                session_id, "internal", "compliance", agent_id,
-                f"compliance.parse_retry.{agent_id}",
-                {"attempt": parse_retries, "error": result.get("analysis", "")[:200]},
-                "error",
-            ))
+            self._log(session_id, f"compliance.parse_retry.{agent_id}",
+                      {"attempt": parse_retries, "error": result.get("analysis", "")[:200]}, "error", to_agent=agent_id)
             result = await agent_func(query, session_id, disposition=None)
 
-        # Pass disposition so compliance can run integrity cross-checks
-        verdict = await self.evaluate_analysis(agent_id, result, session_id, disposition=disposition)
+        verdict = await self.evaluate_analysis(agent_id, result, session_id, disposition=disposition, state=state)
 
         revision_count = 0
         while not verdict.approved and revision_count < self._max_revisions:
             revision_count += 1
 
-            # Build revision request
             revision = RevisionRequest(
                 original_message=result,
                 violated_constraints=[r.rule for r in verdict.deterministic_results + verdict.semantic_results if not r.passed],
@@ -1177,20 +1167,11 @@ class ComplianceAgent:
                 max_revisions=self._max_revisions,
             )
 
-            # Log: compliance reports to orchestrator
-            policy_id = get_manifest(agent_id).override_policy.policy_id
             revision_payload = revision.model_dump()
             revision_payload["policy_id"] = policy_id
-            logger.log(build_message(
-                session_id, "outbound", "compliance", "central",
-                f"compliance.revision.{agent_id}",
-                revision_payload, "constraint_violation",
-            ))
+            self._log(session_id, f"compliance.revision.{agent_id}", revision_payload, "constraint_violation", direction="outbound")
 
-            # Re-run agent WITHOUT disposition
             # Issue 7 mitigation: only list the VIOLATED constraints, not the full list.
-            # This keeps the revision prompt short and focused, preventing coherence
-            # degradation on later revisions with llama3.1.
             violated_constraints = [
                 r.rule for r in verdict.deterministic_results + verdict.semantic_results
                 if not r.passed
@@ -1208,41 +1189,26 @@ class ComplianceAgent:
             )
             result = await agent_func(revised_query, session_id, disposition=None)
 
-            # Handle parse errors during revision
             parse_retries_rev = 0
             while result.get("error") and parse_retries_rev < self._max_parse_retries:
                 parse_retries_rev += 1
                 result = await agent_func(revised_query, session_id, disposition=None)
 
-            # Keep disposition for scrutiny even on revised responses
-            verdict = await self.evaluate_analysis(agent_id, result, session_id, disposition=disposition)
-            verdict.revision_count = revision_count
+            verdict = await self.evaluate_analysis(agent_id, result, session_id, disposition=disposition, state=state,
+                                                   revision_count=revision_count)
 
-        # FORCED BLOCK — message that cannot be made compliant is DROPPED
         if not verdict.approved:
             verdict.overall_status = "forced_block"
-            logger.log(build_message(
-                session_id, "internal", "compliance", "central",
-                f"compliance.block.{agent_id}",
-                {
-                    "reason": "Max revisions exceeded — message permanently blocked",
-                    "revision_count": revision_count,
-                    "violated_rules": verdict.violated_rules,
-                    "regulatory_basis": verdict.regulatory_basis,
-                    "policy_id": get_manifest(agent_id).override_policy.policy_id,
-                },
-                "forced_block",
-            ))
-            return None, verdict  # blocked — no result delivered
+            self._log(session_id, f"compliance.block.{agent_id}", {
+                "reason": "Max revisions exceeded — message permanently blocked",
+                "revision_count": revision_count,
+                "violated_rules": verdict.violated_rules,
+                "regulatory_basis": verdict.regulatory_basis,
+                "policy_id": policy_id,
+            }, "forced_block")
+            return None, verdict
 
-        # APPROVED — log delivery
-        logger.log(build_message(
-            session_id, "internal", "compliance", "central",
-            f"compliance.approve.{agent_id}.final",
-            {"revision_count": revision_count, "approved": True},
-            "approved",
-        ))
-
+        self._log(session_id, f"compliance.approve.{agent_id}.final", {"revision_count": revision_count, "approved": True}, "approved")
         return result, verdict
 
 

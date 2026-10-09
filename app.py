@@ -13,6 +13,7 @@ load_dotenv()
 
 from agents.manifests import DEFAULT_PRINCIPAL, DispositionProfile, ensure_principal
 from agents.orchestrator import run
+from agents.domain import get_domain
 from mcp.logger import get_logger
 from ui.agent_graph import render_agent_graph
 from ui.constraint_view import render_constraint_view
@@ -33,7 +34,8 @@ st.set_page_config(
 
 def _generate_trace(result) -> dict:
     """Build the accountability trace dict from an OrchestrationResult."""
-    from agents.manifests import _MANIFEST_REGISTRY, get_manifest, get_principal
+    from agents.manifests import all_manifests, get_manifest, get_principal
+    _MANIFEST_REGISTRY = all_manifests()
     logger = get_logger()
     messages = logger.get_session(result.session_id)
 
@@ -208,7 +210,8 @@ def _format_trace_text(trace: dict) -> str:
 def _render_compliance_log(session_id: str) -> None:
     """Render a regulator-readable log of compliance verdicts only."""
     from mcp.logger import get_logger
-    from agents.manifests import get_manifest, _MANIFEST_REGISTRY
+    from agents.manifests import get_manifest, all_manifests
+    _MANIFEST_REGISTRY = all_manifests()
     logger = get_logger()
     messages = logger.get_session(session_id)
 
@@ -356,7 +359,19 @@ with st.sidebar:
     st.subheader("Agent Dispositions")
     st.caption("Adjust behavioral dispositions to test how agents drift from their mandates.")
 
-    from agents.dispositions import DISPOSITION_PRESETS, get_preset, get_preset_names
+    # Domain switch (ROADMAP 6): every panel reads the active domain.
+    from agents.domain import available_domains, get_domain as _get_domain, load_domain, set_domain
+    _domains = available_domains()
+    _current = _get_domain().domain_id
+    _chosen = st.selectbox("Domain", _domains, index=_domains.index(_current) if _current in _domains else 0, key="domain_select")
+    if _chosen != _current:
+        set_domain(load_domain(_chosen))
+        for key in ("last_result", "current_session_id", "view_session_id", "selected_agent", "custom_dispositions"):
+            st.session_state.pop(key, None)
+        st.rerun()
+    st.caption(_get_domain().description)
+
+    from agents.dispositions import get_preset, get_preset_names
 
     def _on_preset_change():
         """Clear cached results when disposition preset changes."""
@@ -364,7 +379,7 @@ with st.sidebar:
             st.session_state.pop(key, None)
 
     preset_keys = get_preset_names()
-    preset_labels = [DISPOSITION_PRESETS[k]["label"] for k in preset_keys]
+    preset_labels = [get_preset(k)["label"] for k in preset_keys]
     selected_label = st.radio(
         "Preset",
         preset_labels,
@@ -380,7 +395,7 @@ with st.sidebar:
     if selected_key == "custom":
         with st.expander("Custom Disposition Settings", expanded=True):
             agent_to_configure = st.selectbox(
-                "Agent", ["stocks", "bonds", "materials", "central"], key="disp_agent"
+                "Agent", _get_domain().specialist_ids + [_get_domain().orchestrator_id], key="disp_agent"
             )
             d_self = st.slider("Self-serving", 0.0, 1.0, 0.0, 0.1, key=f"d_self_{agent_to_configure}")
             d_risk = st.slider("Risk-seeking", 0.0, 1.0, 0.0, 0.1, key=f"d_risk_{agent_to_configure}")
@@ -594,7 +609,7 @@ with col2:
                             logger = get_logger()
                             logger.log(_build_message(
                                 result.session_id, "internal",
-                                "user", "central",
+                                "user", get_domain().orchestrator_id,
                                 "principal.revoke",
                                 {
                                     "policy_id": DEFAULT_OVERRIDE_POLICY.policy_id,
