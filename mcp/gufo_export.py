@@ -51,6 +51,8 @@ def _add_schema(graph: Graph) -> None:
         (AII.Claim, GUFO.ExtrinsicMode),
         (AII.Disposition, GUFO.IntrinsicMode),
         (AII.CommitmentBreach, GUFO.Situation),
+        (AII.MandateAmendment, GUFO.Event),
+        (AII.NormException, GUFO.Object),
     ]
     for sub, sup in axioms:
         graph.add((sub, RDFS.subClassOf, sup))
@@ -144,6 +146,11 @@ def _add_verdict(
         graph.add((verdict, AII.violatesRule, rule))
     # The evaluated Proposed Action: the message id recorded in the verdict when it refers to a
     # logged entry, otherwise the most recent Proposed Action of the target agent at this point.
+    for app in m.payload.get("exceptions_applied") or []:
+        exc = iri("exception", app.get("exception_id", "?"))
+        graph.add((exc, RDF.type, AII.NormException))
+        graph.add((verdict, AII.appliesException, exc))
+        graph.add((exc, AII.defeatsRule, iri("rule", app.get("defeats", "?"))))
     referenced = str(m.payload.get("message_id") or "")
     action = entries_by_id.get(referenced) or last_action_by_agent.get(target)
     if action is not None:
@@ -231,6 +238,16 @@ def _add_breach(graph: Graph, entry: URIRef, payload: dict[str, Any]) -> None:
         graph.add((breach, AII.violatesRule, iri("rule", rule_id)))
 
 
+def _add_amendment(graph: Graph, entry: URIRef, m: MCPMessage) -> None:
+    """A Mandate amendment as an event that the Principal participates in and that changes (or fails to change) a Mandate."""
+    a = m.payload.get("amendment") or {}
+    graph.add((entry, RDF.type, AII.MandateAmendment))
+    graph.add((entry, AII.amendedMandate, iri("mandate", str(a.get("agent_id", "?")))))
+    graph.add((entry, AII.issuedByPrincipal, _agent_node(str(a.get("principal_id", "?")))))
+    graph.add((entry, AII.parameter, Literal(str(a.get("parameter", "")))))
+    graph.add((entry, AII.admitted, Literal(bool(m.payload.get("admitted")), datatype=XSD.boolean)))
+
+
 def _rule_labels() -> dict[str, str]:
     """Return rule descriptions from the registry, or an empty mapping if the registry is unavailable."""
     try:
@@ -294,6 +311,8 @@ def export_session_graph(session_id: str, logger: MCPLogger | None = None) -> Gr
             _add_manifestations(graph, m.payload)
         elif m.method.startswith("delegation.breach."):
             _add_breach(graph, entry, m.payload)
+        elif m.method in ("governance.amend", "governance.amend.rejected"):
+            _add_amendment(graph, entry, m)
 
     begin = messages[0].timestamp.isoformat() if messages else None
     if begin:

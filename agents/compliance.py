@@ -39,6 +39,7 @@ class RuleResult(BaseModel):
     detail: str
     regulatory_basis: str | None = None
     state_snapshot: dict[str, Any] | None = None   # the session state a state predicate was evaluated against
+    exceptions_applied: list[dict[str, Any]] = []  # norm exceptions that defeated this constraint (ROADMAP 1.3)
 
 
 class ComplianceVerdict(BaseModel):
@@ -58,6 +59,7 @@ class ComplianceVerdict(BaseModel):
     overall_status: Literal["approved", "rejected", "forced_block"] = "approved"
     state_snapshot: dict[str, Any] | None = None   # present when a state predicate was evaluated
     warnings: list[str] = []                       # failed warn-severity rules: recorded, not blocking
+    exceptions_applied: list[dict[str, Any]] = []  # norm exceptions applied in this evaluation (ROADMAP 1.3)
 
 
 class RevisionRequest(BaseModel):
@@ -335,6 +337,86 @@ def _flagged(payload: dict[str, Any], p: Predicate) -> bool:
 
 
 def _evaluate_boundary_constraint(
+    bc: BoundaryConstraint,
+    payload: dict[str, Any],
+    manifest: AgentManifest,
+    state: SessionState | None = None,
+) -> RuleResult:
+    """Evaluate one boundary constraint, first resolving the norm exceptions that defeat it (ROADMAP 1.3)."""
+    from agents.norms import first_applicable
+
+    try:
+        exceptions = [e for e in get_domain().exceptions if e.defeats == bc.rule_id]
+    except Exception:
+        exceptions = []
+    p = bc.predicate
+    if not exceptions or (p.condition_param is not None and bool(manifest.risk_parameters.get(p.condition_param)) != p.condition_value):
+        return _evaluate_plain(bc, payload, manifest, state)
+
+    # Payload-level exception: defeats the whole constraint for this response.
+    whole = first_applicable([e for e in exceptions if e.when_field], None, payload)
+    if whole is not None:
+        application = {"exception_id": whole.exception_id, "defeats": bc.rule_id, "item": "response", "effect": whole.effect}
+        if whole.effect == "exempt":
+            return RuleResult(rule=bc.text, rule_id=bc.rule_id, source="deterministic", passed=True,
+                              detail=f"Defeated by {whole.exception_id}: {whole.description}",
+                              regulatory_basis=bc.regulatory_basis, exceptions_applied=[application])
+        bounded = manifest.model_copy(deep=True)
+        bounded.risk_parameters[p.risk_param_key] = manifest.risk_parameters[whole.bound_param_key]
+        application["bound"] = bounded.risk_parameters[p.risk_param_key]
+        r = _evaluate_plain(bc, payload, bounded, state)
+        r.detail = f"{r.detail} [bound of {whole.exception_id}: {application['bound']}]"
+        r.exceptions_applied = [application]
+        return r
+
+    item_level = [e for e in exceptions if e.when_key]
+    raw = payload.get(p.structured_field) if p.structured_field else None
+    items = _structured_items(raw) if isinstance(raw, list) else None
+    if not item_level or items is None:
+        return _evaluate_plain(bc, payload, manifest, state)
+
+    groups: dict[str | None, list[dict[str, Any]]] = {None: []}
+    applications: list[dict[str, Any]] = []
+    for item in items:
+        exc = first_applicable(item_level, item, payload)
+        key = exc.exception_id if exc is not None else None
+        groups.setdefault(key, []).append(item)
+        if exc is not None:
+            app = {"exception_id": exc.exception_id, "defeats": bc.rule_id, "item": str(item.get("name", "?")), "effect": exc.effect}
+            if exc.effect == "bound":
+                app["bound"] = manifest.risk_parameters.get(exc.bound_param_key)
+            applications.append(app)
+    if not applications:
+        return _evaluate_plain(bc, payload, manifest, state)
+
+    by_id = {e.exception_id: e for e in item_level}
+    results: list[RuleResult] = []
+    for key, members in groups.items():
+        if key is not None and by_id[key].effect == "exempt":
+            continue
+        if key is None and not members:
+            continue
+        variant = dict(payload)
+        variant[p.structured_field] = members
+        variant["proposed_allocation"] = []          # the flat list mixes exempt and covered items
+        bound_manifest = manifest
+        if key is not None:
+            bound_manifest = manifest.model_copy(deep=True)
+            bound_manifest.risk_parameters[p.risk_param_key] = manifest.risk_parameters[by_id[key].bound_param_key]
+        r = _evaluate_plain(bc, variant, bound_manifest, state)
+        if key is not None:
+            r.detail = f"[{key}, bound {bound_manifest.risk_parameters[p.risk_param_key]}] {r.detail}"
+        results.append(r)
+    exempt = [a["item"] for a in applications if a["effect"] == "exempt"]
+    detail = "; ".join(r.detail for r in results) or "All items covered by exceptions"
+    if exempt:
+        detail += f"; exempt by exception: {exempt}"
+    snapshot = next((r.state_snapshot for r in results if r.state_snapshot), None)
+    return RuleResult(rule=bc.text, rule_id=bc.rule_id, source="deterministic", passed=all(r.passed for r in results),
+                      detail=detail, regulatory_basis=bc.regulatory_basis, state_snapshot=snapshot, exceptions_applied=applications)
+
+
+def _evaluate_plain(
     bc: BoundaryConstraint,
     payload: dict[str, Any],
     manifest: AgentManifest,
@@ -1212,6 +1294,7 @@ class ComplianceAgent:
             state_snapshot=snapshot,
             revision_count=revision_count,
             warnings=warnings,
+            exceptions_applied=[a for r in det_results for a in r.exceptions_applied],
         )
 
         status = "approved" if all_passed else "constraint_violation"

@@ -141,6 +141,20 @@ CHECKS: list[IntegrityCheck] = [
 ]
 
 
+CHECKS.append(IntegrityCheck(
+    check_id="Q10_AMENDMENT_BY_PRINCIPAL",
+    claim="Every admitted Mandate amendment is issued by the session's Principal (ROADMAP 1.3)",
+    description="Admitted amendments whose issuer is not the Principal of the session",
+    query="""
+    SELECT ?amendment ?issuer WHERE {
+      ?amendment a aii:MandateAmendment ; aii:admitted true ; aii:issuedByPrincipal ?issuer .
+      ?session a aii:Session .
+      FILTER NOT EXISTS { ?session aii:principal ?issuer }
+    }
+    """,
+))
+
+
 def run_checks(graph: Graph, checks: list[IntegrityCheck] | None = None, with_gufo: bool = False) -> list[CheckResult]:
     """Run every integrity check against a graph and report the violating rows; with_gufo adds the reasoner check Q9."""
     results: list[CheckResult] = []

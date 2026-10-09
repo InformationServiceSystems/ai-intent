@@ -26,7 +26,13 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 1.3 Defeasible norms and session-mutable Mandates
 
-**Status:** research. The constraints have no exception structure and Mandates are immutable within a session; both are deliberate for regulated finance. Extending the model to defeasible deontic logic (a prohibition that a stronger norm can override) and to Mandates that a Principal may amend during a session, with the amendment itself logged as a governance event, widens the class of domains the model transfers to.
+**Status:** done 9 October 2026 (`agents/norms.py`; tests in `tests/test_norms.py`).
+
+- **Norm exceptions.** A `NormException` is a registered, stronger norm that defeats one boundary constraint for the items it covers, by exemption or by its own bound read from a risk parameter. Item-level exceptions match an item field (an index fund under a single-position cap); response-level exceptions need a flag and a stated justification (extreme urgency under Art. 32(2)(c) defeating the competitive-procedure rule). Exceptions of one constraint are applied in priority order, the first that covers an item wins (lexicographic priority). Every application is recorded on the rule result and the verdict (`exceptions_applied`) and exported to the gUFO trace (`aii:appliesException`, `aii:defeatsRule`). Design check D8 requires every exception to be registered and to defeat an existing constraint; its bound parameters count as read for D1, and containment rules can bound them.
+- **Mandate amendments.** A `MandateAmendment` is a governance event by which the Principal changes one risk parameter of a Mandate it owns, at session start or before the synthesis. It is admitted only if the Principal owns the Mandate, the parameter exists, the amended Mandate stays contained in its parent and its sub-mandates in it, and the design checks report nothing new. Admitted and rejected amendments are logged (`governance.amend`, `governance.amend.rejected`) before their effect; an admitted one activates a session-scoped copy of the domain with regenerated constraint texts, and the registered domain is restored when the session ends, so invariant 5 holds for the registry. Trace invariant Q10 requires every admitted amendment to be issued by the session's Principal.
+- **Evidence.** Offline end-to-end sessions with stubbed model answers: an 18 % gold proposal is delivered after the Principal raises the cap to 20 %, blocked without the amendment, and blocked when a non-owner issues the amendment; all trace invariants hold in each.
+
+The clinical domain (3.3) is the domain in which these constructs are needed rather than optional.
 
 ## 2. Ontological track
 

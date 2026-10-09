@@ -121,6 +121,17 @@ CHECKS: list[DesignCheck] = [
         }""",
     ),
     DesignCheck(
+        check_id="D8_EXCEPTION_TARGET",
+        claim="Every norm exception is registered and defeats a constraint that exists",
+        query="""
+        SELECT ?exc ?problem WHERE {
+          ?e a aii:NormException ; aii:ruleId ?exc .
+          { FILTER NOT EXISTS { ?e aii:defeats ?bc } BIND("defeats no existing constraint" AS ?problem) }
+          UNION
+          { ?e om:operationalisedBy ?r . FILTER NOT EXISTS { ?r a om:RegulatoryRule } BIND("not in the rule registry" AS ?problem) }
+        }""",
+    ),
+    DesignCheck(
         check_id="D7_MODEL_CARDINALITY",
         claim="The Mandate content satisfies the cardinality restrictions of the OntoUML model (closed world)",
     ),

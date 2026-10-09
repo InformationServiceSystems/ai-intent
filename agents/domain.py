@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from agents.constraint_spec import BoundaryConstraint, ConstraintSpec, to_boundary_constraint
 from agents.manifests import AgentManifest, DispositionProfile, Principal
+from agents.norms import NormException
 from agents.regulatory_rules import RegulatoryRule
 
 
@@ -120,6 +121,7 @@ class Domain(BaseModel):
     # Terms the anti-customer integrity check counts as complexity indicators.
     complexity_terms: list[str] = []
     containment_rules: list[ContainmentRule] = []
+    exceptions: list[NormException] = []     # defeasible norms (ROADMAP 1.3)
     disposition_presets: dict[str, DispositionPreset] = {}
     test_cases: list[TestCase] = []
     default_state: SessionState = SessionState()

@@ -119,6 +119,23 @@ def export_domain_mandates(domain: Domain, distinct_constraints: bool = True) ->
         for agent_id in rule.applies_to:
             g.add((r, AII.appliesTo, _iri("mandate", d, agent_id)))
 
+    for exc in domain.exceptions:
+        node = _iri("exception", d, exc.exception_id)
+        g.add((node, RDF.type, AII.NormException))
+        g.add((node, AII.ruleId, Literal(exc.exception_id)))
+        g.add((node, OM.operationalisedBy, _iri("rule", d, exc.exception_id)))
+        g.add((node, AII.priority, Literal(exc.priority, datatype=XSD.integer)))
+        g.add((node, AII.effect, Literal(exc.effect)))
+        defeated = [s for s in domain.constraint_specs if s.rule_id == exc.defeats]
+        for i, spec in enumerate(domain.constraint_specs):
+            if spec.rule_id == exc.defeats:
+                g.add((node, AII.defeats, _iri("constraint", d, f"{spec.agent_id}/{i}")))
+        if exc.bound_param_key and defeated:
+            agent_id = defeated[0].agent_id
+            g.add((node, AII.constraintMandate, _iri("mandate", d, agent_id)))
+            g.add((node, AII.readsParameterKey, Literal(exc.bound_param_key)))
+            g.add((node, AII.readsParameter, _iri("param", d, f"{agent_id}/{exc.bound_param_key}")))
+
     for c in domain.containment_rules:
         node = _iri("containment", d, f"{c.child_id}/{c.parameter}")
         g.add((node, RDF.type, AII.ContainmentRule))

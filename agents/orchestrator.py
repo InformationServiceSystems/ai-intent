@@ -17,6 +17,7 @@ from agents.compliance import ComplianceVerdict, get_compliance_agent
 from agents.delegation import accountability_record, build_delegation_chain, check_chain_containment
 from agents.dispositions import detect_manifestations
 from agents.domain import SessionState, get_domain
+from agents.norms import MandateAmendment
 from agents.manifests import DispositionProfile, confidence_at_or_below, manifest_to_system_prompt
 from agents.specialist import specialist_functions
 from mcp.logger import build_message, get_logger
@@ -48,9 +49,29 @@ class OrchestrationResult(BaseModel):
     domain_id: str = "finance"
     state_snapshot: dict[str, Any] | None = None   # the session state the state predicates used
     model_accountability_note: str = ""            # what the model wrote, kept for comparison with the projection
+    amendments: list[dict[str, Any]] = []          # governance events: admitted and rejected Mandate amendments (ROADMAP 1.3)
 
 
 async def run(
+    query: str,
+    session_id: str,
+    *args: Any,
+    amendments: list[MandateAmendment] | None = None,
+    **kwargs: Any,
+) -> OrchestrationResult:
+    """Execute the full orchestration pipeline for a user query; amendments are admitted as governance events (ROADMAP 1.3).
+
+    The registered domain is restored when the session ends, whatever the amendments did.
+    """
+    from agents import domain as domain_module
+    previous = domain_module._active
+    try:
+        return await _run(query, session_id, *args, amendments=amendments or [], **kwargs)
+    finally:
+        domain_module._active = previous
+
+
+async def _run(
     query: str,
     session_id: str,
     dispositions: dict[str, DispositionProfile] | None = None,
@@ -60,6 +81,7 @@ async def run(
     principal_id: str | None = None,
     routing_override: dict[str, Any] | None = None,
     state: SessionState | None = None,
+    amendments: list[MandateAmendment] | None = None,
 ) -> OrchestrationResult:
     """Execute the full orchestration pipeline for a user query.
 
@@ -82,6 +104,15 @@ async def run(
     principal_id = principal_id or domain.principal.principal_id
 
     logger.register_principal(session_id, principal_id)
+
+    # Governance events (ROADMAP 1.3): amendments at session start change the session's Mandates
+    # before anything is delegated; rejected amendments are logged and have no effect.
+    amendments = amendments or []
+    amendment_log: list[dict[str, Any]] = []
+    if _admit_amendments([a for a in amendments if a.phase == "start"], session_id, amendment_log):
+        domain = get_domain()
+        oid = domain.orchestrator_id
+        agent_funcs = specialist_functions()
 
     base_max_revisions = compliance._max_revisions
     compliance._max_revisions = round(base_max_revisions * compliance_multiplier)
@@ -246,6 +277,9 @@ async def run(
             all_violations.append(f"{agent_id}: BLOCKED — uncertainty policy (confidence={observed})")
 
     # Compliance history for the synthesis context and the note: full revision history from the log
+    if _admit_amendments([a for a in amendments if a.phase == "before_synthesis"], session_id, amendment_log):
+        domain = get_domain()
+
     history = compliance_history(agent_ids, logger.get_session(session_id), oid)
 
     # Step D — Synthesis call → routed through compliance (CP3). The accountability note is
@@ -299,10 +333,33 @@ async def run(
         domain_id=domain.domain_id,
         state_snapshot=session_state.snapshot(),
         model_accountability_note=str(synthesis.get("model_accountability_note", "")),
+        amendments=amendment_log,
     )
 
     compliance._max_revisions = base_max_revisions
     return orch_result
+
+
+def _admit_amendments(amendments: list[MandateAmendment], session_id: str, amendment_log: list[dict[str, Any]]) -> bool:
+    """Admit amendments one by one against the current session domain, log each decision, activate the amended domain; True if any was admitted."""
+    from agents.norms import admit, session_domain  # noqa: F401  (session_domain documents the scoping)
+    from agents import domain as domain_module
+    logger = get_logger()
+    changed = False
+    for a in amendments:
+        current = get_domain()
+        decision, amended = admit(current, a)
+        payload = decision.model_dump(mode="json")
+        amendment_log.append(payload)
+        logger.log(build_message(
+            session_id, "internal", a.principal_id, current.orchestrator_id,
+            "governance.amend" if decision.admitted else "governance.amend.rejected",
+            payload, "approved" if decision.admitted else "constraint_violation",
+        ))
+        if amended is not None:
+            domain_module.set_domain(amended)
+            changed = True
+    return changed
 
 
 def _state_context(agent_id: str, state: SessionState) -> str:
