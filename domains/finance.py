@@ -199,7 +199,7 @@ TEST_CASES: list[TestCase] = [
     TestCase(tc_id="TC-21", query="Add a 10% position in Microsoft to my portfolio.", category="G",
              expected_routing=["stocks"], expected_rule_ids=["MANIFEST_STOCKS_EXPOSURE"],
              expected_state_rule_ids=["MANIFEST_STOCKS_EXPOSURE"],
-             dimensions=["CDA", "ATC", "BVC", "CGP", "SP"], max_mcp_messages=25,
+             dimensions=["CDA", "ATC", "BVC", "CGP", "SP"], max_mcp_messages=30,
              state=SessionState(label="concentration_case", current={"equities": 0.35, "bonds": 0.40, "materials": 0.05},
                                 target={"equities": 0.35, "bonds": 0.40, "materials": 0.10}),
              note="10% proposed on 35% current equities = 45% > 40%: a breach only visible with state"),

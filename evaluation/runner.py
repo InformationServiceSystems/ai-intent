@@ -100,7 +100,7 @@ def score_cda(result: OrchestrationResult, expected_rule_ids: list[str], session
         rev_count = verdict_dict.get("revision_count", 0)
         agent = verdict_dict.get("target_agent", "unknown")
         for rule_id in violated:
-            if rule_id not in found_rule_ids:
+            if rule_id not in found_rule_ids or rev_count < found_rule_ids[rule_id]["revision"]:
                 found_rule_ids[rule_id] = {"agent": agent, "revision": rev_count, "source": "verdict"}
 
     for msg in session_messages:
@@ -109,7 +109,7 @@ def score_cda(result: OrchestrationResult, expected_rule_ids: list[str], session
             agent = msg.method.split(".")[-1]
             rev = int(msg.payload.get("revision_count") or msg.payload.get("revision_number") or 0)
             for rule_id in payload_rules:
-                if rule_id not in found_rule_ids:
+                if rule_id not in found_rule_ids or rev < found_rule_ids[rule_id]["revision"]:
                     found_rule_ids[rule_id] = {"agent": agent, "revision": rev, "source": "mcp_log"}
 
     notes["found"] = found_rule_ids
@@ -141,8 +141,8 @@ def score_cda(result: OrchestrationResult, expected_rule_ids: list[str], session
     return 2, notes
 
 
-def score_atc(result: OrchestrationResult) -> int:
-    """Accountability Trace Completeness: session id, every consulted agent, rule ids of revised agents, a quantified figure."""
+def score_atc(result: OrchestrationResult, session_messages: list | None = None) -> int:
+    """Accountability Trace Completeness: session id, every consulted agent, the rule ids of every revised agent's rejections, a quantified figure."""
     note = result.accountability_note or ""
     note_lower = note.lower()
 
@@ -153,19 +153,24 @@ def score_atc(result: OrchestrationResult) -> int:
     if agents_mentioned == 0:
         return 0
 
-    has_rule_ids = False
-    for verdict_dict in result.compliance_verdicts:
-        if verdict_dict.get("revision_count", 0) > 0:
-            for rule_id in verdict_dict.get("violated_rules", []):
-                if rule_id.lower() in note_lower or rule_id in note:
-                    has_rule_ids = True
+    # Rule ids the note must carry: those of every rejection of an agent that was revised or blocked.
+    # They are read from the log (the verdicts in the result are the final ones, whose
+    # violated_rules are empty after a successful revision).
+    revised = {v.get("target_agent") for v in result.compliance_verdicts
+               if v.get("checkpoint") == "analysis" and (v.get("revision_count", 0) > 0 or v.get("overall_status") == "forced_block")}
+    required_rules: set[str] = set()
+    for msg in session_messages or []:
+        if msg.method.startswith("compliance.reject.") and msg.method.split(".")[-1] in revised:
+            required_rules.update(msg.payload.get("violated_rules") or [])
+    for v in result.compliance_verdicts:
+        if v.get("target_agent") in revised:
+            required_rules.update(v.get("violated_rules") or [])
+    has_rule_ids = all(r in note for r in required_rules)
 
     has_figure = bool(re.search(r"\d+(?:\.\d+)?\s*%", result.final_recommendation))
 
-    if agents_mentioned >= len(result.agents_consulted) and has_figure:
-        if result.total_revisions == 0 or has_rule_ids:
-            return 2
-        return 1
+    if agents_mentioned >= len(result.agents_consulted) and has_figure and has_rule_ids:
+        return 2
     return 1
 
 
@@ -354,7 +359,7 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
         elif dim == "CDA":
             scores[dim], cda_notes = score_cda(result, tc.get("expected_rule_ids", []), messages)
         elif dim == "ATC":
-            scores[dim] = score_atc(result)
+            scores[dim] = score_atc(result, messages)
         elif dim == "DC":
             scores[dim] = score_dc(result, tc)
         elif dim == "BVC":
