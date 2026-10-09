@@ -1,0 +1,81 @@
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <https://github.com/InformationServiceSystems/ai-intent/oracle#> .
+
+# Supplies: "the CPV division of every lot must lie between 3 and 44"
+ex:SuppliesCpv a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_CPV_SCOPE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "supplies" ; ex:lots ?l . ?l ex:cpv_division ?c . FILTER (?c < 3 || ?c > 44) }""" ] .
+# "No single lot above the EU supplies threshold of €221,000"
+ex:SuppliesLotValue a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_LOT_VALUE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "supplies" ; ex:lots ?l . ?l ex:estimated_value_eur ?v . FILTER (?v > 221000) }""" ] .
+# "no single lot may carry more than 60% of the procedure's value"
+ex:SuppliesLotShare a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_LOT_SHARE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "supplies" ; ex:lots ?l . ?l ex:share ?s . FILTER (?s > 0.60) }""" ] .
+# "every lot must be awarded in a competitive procedure (open, restricted or competitive with negotiation)"
+ex:SuppliesProcedure a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_NO_SINGLE_SOURCE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "supplies" ; ex:lots ?l . ?l ex:procedure ?p .
+      FILTER (!REGEX(?p, "^(open|restricted|competitive with negotiation)", "i")) }""" ] .
+# "must state a sustainability criterion for every lot"
+ex:SuppliesSustainability a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_SUSTAINABILITY" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "supplies" ; ex:lots ?l . FILTER NOT EXISTS { ?l ex:sustainability_criterion ?c . FILTER (STRLEN(STR(?c)) > 0) } }""" ] .
+# "The supplies share of the annual budget after the proposed lots must not exceed 60% (committed plus proposed)"
+ex:SuppliesBudget a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SUPPLIES_BUDGET_EXPOSURE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this (SUM(?b) AS ?s) WHERE { $this ex:agent "supplies" ; ex:lots ?l . ?l ex:budget_share ?b } GROUP BY $this }
+      OPTIONAL { $this ex:state_current_supplies ?cur } FILTER (COALESCE(?cur, 0) + ?s > 0.60) }""" ] .
+
+# Services: "the CPV division of every lot must lie between 50 and 98"
+ex:ServicesCpv a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_CPV_SCOPE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:lots ?l . ?l ex:cpv_division ?c . FILTER (?c < 50 || ?c > 98) }""" ] .
+# "must decline when the supply share of the contract value exceeds 50%"
+ex:ServicesMixed a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_MIXED_CONTRACT" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:supply_share ?s . FILTER (?s > 0.50) }""" ] .
+# "No single lot above the EU services threshold of €221,000"
+ex:ServicesLotValue a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_LOT_VALUE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:lots ?l . ?l ex:estimated_value_eur ?v . FILTER (?v > 221000) }""" ] .
+# "No lot may be subcontracted beyond 30% of its value"
+ex:ServicesSubcontracting a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_SUBCONTRACTING" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:lots ?l . ?l ex:subcontracting_share ?s . FILTER (?s > 0.30) }""" ] .
+# "Framework agreements must not exceed 4 years"
+ex:ServicesFramework a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_FRAMEWORK_DURATION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:framework_duration_years ?y . FILTER (?y > 4) }""" ] .
+# "must state how conflicts of interest of staff involved in the procedure are identified"
+ex:ServicesConflict a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_SERVICES_CONFLICT_SCREENING" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "services" ; ex:conflict_of_interest_screening ?c . FILTER (STRLEN(STR(?c)) = 0) }""" ] .
+
+# Works: "CPV division 45 (construction work)"
+ex:WorksCpv a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_WORKS_CPV_SCOPE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "works" ; ex:lots ?l . ?l ex:cpv_division ?c . FILTER (?c != 45) }""" ] .
+# "No single lot above the EU works threshold of €5,538,000"
+ex:WorksLotValue a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_WORKS_LOT_VALUE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "works" ; ex:lots ?l . ?l ex:estimated_value_eur ?v . FILTER (?v > 5538000) }""" ] .
+# "The main contractor may subcontract at most 40% of a lot's value"
+ex:WorksSubcontracting a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_WORKS_SUBCONTRACTING" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "works" ; ex:lots ?l . ?l ex:subcontracting_share ?s . FILTER (?s > 0.40) }""" ] .
+# "every lot must be awarded in a competitive procedure"
+ex:WorksProcedure a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_WORKS_NO_SINGLE_SOURCE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "works" ; ex:lots ?l . ?l ex:procedure ?p .
+      FILTER (!REGEX(?p, "^(open|restricted|competitive with negotiation)", "i")) }""" ] .
+# "must state the guarantee (bond or retention) for every lot"
+ex:WorksGuarantee a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_WORKS_PERFORMANCE_GUARANTEE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "works" ; ex:lots ?l . FILTER NOT EXISTS { ?l ex:performance_guarantee ?g . FILTER (STRLEN(STR(?g)) > 0) } }""" ] .
+
+# Coordinator: "Maximum 60% of the annual procurement budget in any single contract type"
+ex:CoordinatorMaxType a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_COORDINATOR_MAX_CONTRACT_TYPE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "coordinator" ; ex:allocation_by_contract_type ?m . ?m ex:share ?v . FILTER (?v > 0.60) }""" ] .

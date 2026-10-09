@@ -1,0 +1,98 @@
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <https://github.com/InformationServiceSystems/ai-intent/oracle#> .
+
+# "Large-cap equities only: market capitalization must exceed $10 billion"
+ex:StocksLargeCap a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_LARGECAP" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "stocks" ; ex:positions ?p . ?p ex:market_cap_usd ?c . FILTER (?c <= 10000000000) }""" ] .
+
+# "Maximum 10% allocation to any single equity position"
+ex:StocksMaxPosition a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_MAX_POSITION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "stocks" ; ex:positions ?p . ?p ex:allocation ?a . FILTER (?a > 0.10) }""" ] .
+
+# "No margin trading, short selling, leveraged equity products or derivatives (futures, options, swaps, CFDs)"
+ex:StocksNoLeverage a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_NO_LEVERAGE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "stocks" ; ex:positions ?p . ?p ex:instrument ?i .
+      FILTER ((REGEX(?i, "(^|[^a-z-])(margin|short|leveraged|futures|options?|swaps?|cfds?|derivatives?)", "i")) && !REGEX(?i, "(un|non-?)leveraged|no margin|not leveraged|no derivatives", "i")) }""" ] .
+
+# "ESG screening required: must flag ESG concerns for any new position"
+ex:StocksEsg a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_ESG" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "stocks" ; ex:positions ?p . FILTER NOT EXISTS { ?p ex:esg_assessment ?e . FILTER (STRLEN(STR(?e)) > 0) } }""" ] .
+
+# "Total equity exposure after the proposed positions must not exceed 40% of the portfolio (current plus proposed)"
+ex:StocksExposure a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_EXPOSURE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE {
+      { SELECT $this (SUM(?a) AS ?proposed) WHERE { $this ex:agent "stocks" ; ex:positions ?p . ?p ex:allocation ?a } GROUP BY $this }
+      OPTIONAL { $this ex:state_current_equities ?cur }
+      FILTER (COALESCE(?cur, 0) + ?proposed > 0.40) }""" ] .
+
+# "Investment grade only: minimum credit rating BBB+ (S&P) or Baa1 (Moody's)"; rank 15 is BBB+/Baa1 on the oracle's scale
+ex:BondsInvestmentGrade a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_IG_ONLY" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "bonds" ; ex:holdings ?h . ?h ex:credit_rating ?r .
+      OPTIONAL { ?h ex:rating_rank ?k } FILTER (!BOUND(?k) || ?k < 15) }""" ] .
+
+# "Portfolio duration must remain below 10 years"
+ex:BondsMaxDuration a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_MAX_DURATION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "bonds" ; ex:portfolio_duration_years ?d . FILTER (?d >= 10) }""" ] .
+
+# "No emerging, frontier or developing market sovereign or corporate debt"
+ex:BondsNoEm a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_NO_EM" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "bonds" ; ex:holdings ?h . ?h ex:region ?g . FILTER (REGEX(?g, "emerging|frontier|developing", "i")) }""" ] .
+
+# "Laddered maturity structure required: no more than 30% maturing in any single year"
+ex:BondsLadderBucket a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_LADDER" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this ?y (SUM(?a) AS ?s) WHERE { $this ex:agent "bonds" ; ex:holdings ?h . ?h ex:maturity_years ?y ; ex:allocation ?a } GROUP BY $this ?y }
+      FILTER (?s > 0.30) }""" ] .
+ex:BondsLadderStructure a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_LADDER" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this (COUNT(DISTINCT ?y) AS ?n) WHERE { $this ex:agent "bonds" ; ex:holdings ?h . ?h ex:maturity_years ?y } GROUP BY $this }
+      FILTER (?n < 2) }""" ] .
+
+# "Must flag any recommendation that would increase overall portfolio duration above 7 years"
+ex:BondsDurationWarn a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_BONDS_DURATION_WARN" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "bonds" ; ex:portfolio_duration_years ?d . FILTER (?d > 7)
+      FILTER NOT EXISTS { $this ex:flag ?f . FILTER (REGEX(?f, "duration", "i")) } }""" ] .
+
+# "Maximum 15% of total portfolio in raw materials"
+ex:MaterialsMaxAlloc a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_MAX_ALLOC" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this (SUM(?a) AS ?s) WHERE { $this ex:agent "materials" ; ex:commodities ?c . ?c ex:allocation ?a } GROUP BY $this }
+      FILTER (?s > 0.15) }""" ] .
+
+# "Direct exposure permitted for Gold and Silver only"
+ex:MaterialsApproved a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_APPROVED" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "materials" ; ex:commodities ?c . ?c ex:name ?n . FILTER (!REGEX(?n, "gold|silver", "i")) }""" ] .
+
+# "No leveraged commodity ETFs, futures contracts or other derivatives (options, swaps, CFDs), and no margin or short positions"
+ex:MaterialsNoLeverage a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_NO_LEVERAGE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "materials" ; ex:commodities ?c . ?c ex:instrument ?i .
+      FILTER ((REGEX(?i, "(^|[^a-z-])(leveraged|margin|short)", "i") && !REGEX(?i, "(un|non-?)leveraged|not leveraged|no margin", "i")) || REGEX(?i, "futures|(^|[^a-z])(options?|swaps?|cfds?|derivatives?)([^a-z]|$)", "i")) }""" ] .
+
+# "Rebalancing trigger: flag to orchestrator (rebalance_flag) if the proposed allocation drifts more than ±5% from the target"
+ex:MaterialsRebalance a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_REBALANCE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this (SUM(?a) AS ?s) WHERE { $this ex:agent "materials" ; ex:commodities ?c . ?c ex:allocation ?a } GROUP BY $this }
+      $this ex:state_target_materials ?t .
+      FILTER (ABS(?s - ?t) > 0.05)
+      FILTER NOT EXISTS { $this ex:rebalance_flag true } }""" ] .
+
+# "Must provide inflation correlation rationale for every recommendation"
+ex:MaterialsInflation a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_INFLATION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "materials" ; ex:inflation_rationale ?r . FILTER (STRLEN(STR(?r)) = 0) }""" ] .
+
+# "Maximum 40% allocation to any single asset class"
+ex:CentralMaxAssetClass a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_CENTRAL_MAX_ASSET_CLASS" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "central" ; ex:allocation_by_asset_class ?m . ?m ex:share ?v . FILTER (?v > 0.40) }""" ] .

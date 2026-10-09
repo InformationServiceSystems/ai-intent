@@ -91,7 +91,7 @@ def oracle_stocks(payload):
     low = a.lower()
     m = get_manifest("stocks")
     out = [_forbidden(
-        a, _LEV, "No margin trading, short selling, or leveraged equity products",
+        a, _LEV, "No margin trading, short selling, leveraged equity products or derivatives (futures, options, swaps, CFDs)",
         "MANIFEST_STOCKS_NO_LEVERAGE", "Found forbidden term: '{t}'",
         "No leverage terms found", "AgentManifest.stocks", True)]
     over = [p for p in _extract_percentages(a) if p > m.risk_parameters["max_single_position"]]
@@ -139,7 +139,7 @@ def oracle_bonds(payload):
         regulatory_basis="AgentManifest.bonds"))
     em = re.search(r"\b(emerging market|em debt|frontier market|developing countr)", low)
     out.append(RuleResult(
-        rule="No emerging market sovereign or corporate debt",
+        rule="No emerging, frontier or developing market sovereign or corporate debt",
         rule_id="MANIFEST_BONDS_NO_EM", source="deterministic", passed=em is None,
         detail=f"Found emerging market reference: '{em.group()}'" if em else "No emerging market references",
         regulatory_basis="AgentManifest.bonds"))
@@ -167,7 +167,7 @@ def oracle_materials(payload):
         detail=f"Allocations exceeding limit: {[f'{p*100:.1f}%' for p in over]}" if over else "All within limit",
         regulatory_basis="AgentManifest.materials"))
     out.append(_forbidden(
-        a, _LEV, "No leveraged commodity ETFs or futures contracts",
+        a, _LEV, "No leveraged commodity ETFs, futures contracts or other derivatives (options, swaps, CFDs), and no margin or short positions",
         "MANIFEST_MATERIALS_NO_LEVERAGE", "Found forbidden term: '{t}'",
         "No leverage terms found", "AgentManifest.materials", True))
     inf = any(t in low for t in _INFLATION)

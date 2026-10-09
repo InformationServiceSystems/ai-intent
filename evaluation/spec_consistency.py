@@ -115,6 +115,12 @@ def check_text_names_terms(bc: BoundaryConstraint) -> list[Finding]:
         if not any(a[:5] in text for a in alts):
             return [Finding(check="C2_TERMS", rule_id=bc.rule_id, agent_id=bc.agent_id,
                             detail=f"text names none of the forbidden terms {alts[:6]}")]
+    if bc.predicate.kind == "not_in_set" and bc.predicate.forbidden_values:
+        flat = text.replace("-", " ")
+        unnamed = [v for v in bc.predicate.forbidden_values if v.lower().replace("-", " ")[:5] not in flat]
+        if unnamed:
+            return [Finding(check="C2_TERMS", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                            detail=f"text does not name the forbidden values {unnamed}")]
     if bc.predicate.kind == "required_term" and bc.predicate.synonyms:
         if not any(s.lower()[:5] in text for s in bc.predicate.synonyms):
             return [Finding(check="C2_TERMS", rule_id=bc.rule_id, agent_id=bc.agent_id,

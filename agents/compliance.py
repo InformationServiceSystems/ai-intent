@@ -174,6 +174,40 @@ def _coerce_allocations(raw: Any) -> list[float] | None:
     return out or None
 
 
+_PLACEHOLDER_SENTINELS = {"market_cap_usd": 123456789000}
+_EXAMPLE_CACHE: dict[int, list[dict[str, Any]]] = {}
+
+
+def _example_items() -> list[dict[str, Any]]:
+    """The list items shown as examples in the active domain's specialist instructions."""
+    import json as _json
+    domain = get_domain()
+    key = id(domain)
+    if key not in _EXAMPLE_CACHE:
+        items: list[dict[str, Any]] = []
+        for cfg in domain.specialists.values():
+            for m in re.finditer(r'"\w+":\s*\[(\{.*?\})\]', cfg.json_instruction):
+                try:
+                    items.append(_json.loads(m.group(1)))
+                except ValueError:
+                    continue
+        _EXAMPLE_CACHE[key] = items
+    return _EXAMPLE_CACHE[key]
+
+
+def _is_placeholder(item: dict[str, Any]) -> bool:
+    """An item that reproduces a prompt example on every key the example has.
+
+    Neither the word 'Example' nor '(replace)' in a name is enough: the model gives real proposals
+    such names ('Example 5-year bond', 'Example bond (replace)' with its own rating and maturity),
+    and dropping them hid real allocations from the gate (found by the independent oracle, ROADMAP 3.2).
+    """
+    for example in _example_items():
+        if all(str(item.get(k)).strip().lower() == str(v).strip().lower() for k, v in example.items()):
+            return True
+    return False
+
+
 def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
     """Normalise a structured list field (positions, holdings, commodities, lots) to a list of dicts, or None if unusable."""
     if not isinstance(raw, list) or not raw:
@@ -181,8 +215,10 @@ def _structured_items(raw: Any) -> list[dict[str, Any]] | None:
     items: list[dict[str, Any]] = []
     for x in raw:
         if isinstance(x, dict):
-            if "example" in str(x.get("name", "")).lower() or x.get("market_cap_usd") == 123456789000:
-                continue  # the prompt's placeholder item was copied instead of replaced
+            # A copied example is part of the delivered output and is evaluated like any proposal
+            # (oracle finding, 3.2: dropping it hid a 45 % maturity bucket). Only a copied sentinel
+            # value is treated as unknown.
+            x = {k: v for k, v in x.items() if not (k in _PLACEHOLDER_SENTINELS and v == _PLACEHOLDER_SENTINELS[k])}
             items.append(x)
         elif isinstance(x, str) and x.strip():
             items.append({"name": x.strip()})
@@ -225,8 +261,12 @@ def _rating_rank(raw: Any) -> float | None:
     """Return the ordinal rank of a credit rating (higher is better), or None if unrecognised."""
     if not isinstance(raw, str):
         return None
-    token = raw.strip().split()[0] if raw.strip() else ""
-    return float(_RATING_RANK[token]) if token in _RATING_RANK else None
+    if raw.strip().lower() in ("n/a", "na", "nr", "not rated", "unrated", "none", ""):
+        return None
+    for token in re.split(r"[\s/(),;]+", raw.strip()):
+        if token in _RATING_RANK:
+            return float(_RATING_RANK[token])
+    return None
 
 
 def _fraction(value: float) -> float:
@@ -247,7 +287,8 @@ def _structured_values(payload: dict[str, Any], p: Predicate, manifest: AgentMan
     raw = payload.get(p.structured_field) if p.structured_field else None
     if raw is None:
         return None
-    to_num = _rating_rank if p.value_scale == "credit_rating" else _as_number
+    # An unrecognised rating cannot establish investment grade: it ranks below every rating (oracle finding, 3.2).
+    to_num = (lambda r: _rating_rank(r) if _rating_rank(r) is not None else 0.0) if p.value_scale == "credit_rating" else _as_number
     if isinstance(raw, dict):
         out = [(str(k), _as_number(v)) for k, v in raw.items()]
         return [(k, _scaled(p, v)) for k, v in out if v is not None] or None
@@ -413,7 +454,9 @@ def _evaluate_boundary_constraint(
         items = _structured_items(payload.get(p.structured_field))
         allowed = [str(a).lower() for a in manifest.risk_parameters.get(p.set_param_key, [])]
         names = [str(item.get(p.item_key, "")).strip() for item in items]
-        outside = [n for n in names if n and not any(a in n.lower() for a in allowed)]
+        # An empty value cannot establish membership of the approved set (oracle finding, 3.2).
+        outside = [n or f"{item.get('name', '?')}: no {p.item_key}" for n, item in zip(names, items)
+                   if not n or not any(a in n.lower() for a in allowed)]
         phi_satisfied = len(outside) > 0
         label = (p.exceed_label or "Non-approved value")
         detail = f"{label} in structured output: {outside}" if outside else f"All structured values approved: {names}"

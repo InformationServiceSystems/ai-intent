@@ -54,7 +54,7 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 3.2 Independent verification of specification-to-predicate consistency
 
-**Status:** planned. The evaluation's expected rule IDs and the enforced predicates share provenance. Introduce an independent oracle, either a second encoding of the Mandates by a different author or the ORM-generated constraints of 2.1, and measure agreement between the two encodings on the 190 sessions. Disagreements are miscodings by construction.
+**Status:** done 9 October 2026 (`evaluation/oracle_agreement.py`, `evaluation/oracle/shapes_*.ttl`, `paper2/oracle-agreement.md`). A second encoding of both domains' Mandates as SHACL-SPARQL shapes, written from the Mandate texts, was compared with the gate on 6819 (response, rule) pairs from 1023 sessions. Logged gate verdicts agree in 99.19 %; the disagreements exposed four gate defects in input normalisation (unrated holdings passed the rating floor, combined rating notations, placeholder filtering that hid real positions, empty values in set constraints) and three text-predicate inconsistencies (forbidden values not named in the texts). After the fixes the current gate agrees with the oracle on all 6819 pairs. Limitation: same author, independent source and formalism.
 
 ### 3.3 Further domains
 

@@ -50,12 +50,13 @@ def test_schema_validates_a_response():
         pass
 
 
-def test_placeholder_items_are_ignored():
-    """An item copied from the prompt's example is not evaluated as a real position."""
+def test_copied_examples_are_evaluated_and_sentinels_are_unknown():
+    """A copied example item is part of the output and is evaluated; only a copied sentinel value becomes unknown."""
     items = _structured_items([{"name": "Example Corp (replace with the real company)", "market_cap_usd": 123456789000},
                                {"name": "Apple", "market_cap_usd": 2.8e12}])
-    assert [i["name"] for i in items] == ["Apple"]
-    assert _structured_items([{"name": "Example commodity (replace)", "allocation": 0.1}]) is None
+    assert [i["name"] for i in items] == ["Example Corp (replace with the real company)", "Apple"]
+    assert "market_cap_usd" not in items[0] and items[1]["market_cap_usd"] == 2.8e12
+    assert _structured_items([{"name": "Example commodity (replace)", "allocation": 0.1}])[0]["allocation"] == 0.1
 
 
 if __name__ == "__main__":

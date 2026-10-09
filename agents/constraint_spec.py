@@ -328,7 +328,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ConstraintSpec(
         rule_id="MANIFEST_STOCKS_NO_LEVERAGE", agent_id="stocks", variable="leverage_instrument",
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.stocks", tags=["leverage"],
-        template="No margin trading, short selling, or leveraged equity products",
+        template="No margin trading, short selling, leveraged equity products or derivatives (futures, options, swaps, CFDs)",
         condition_param="leverage_permitted", condition_value=False,
         structured_field="positions", item_key="instrument", forbidden_values=_LEVERAGE_VALUES,
         field_description="spot equity or ETF; never margin, short, leveraged or derivative products",
@@ -399,7 +399,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_NO_EM", agent_id="bonds", variable="emerging_market_debt",
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.bonds", tags=["quality_floor"],
-        template="No emerging market sovereign or corporate debt",
+        template="No emerging, frontier or developing market sovereign or corporate debt",
         structured_field="holdings", item_key="region", forbidden_values=["emerging", "frontier", "developing"],
         field_enum=["developed", "emerging"],
         terms=["emerging market", "EM debt", "frontier market", "developing country"],
@@ -447,7 +447,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
     ConstraintSpec(
         rule_id="MANIFEST_MATERIALS_NO_LEVERAGE", agent_id="materials", variable="leverage_instrument",
         kind="not_in_set", deontic_type="F", regulatory_basis="AgentManifest.materials", tags=["leverage"],
-        template="No leveraged commodity ETFs or futures contracts",
+        template="No leveraged commodity ETFs, futures contracts or other derivatives (options, swaps, CFDs), and no margin or short positions",
         condition_param="leverage_permitted", condition_value=False,
         structured_field="commodities", item_key="instrument", forbidden_values=_LEVERAGE_VALUES,
         field_description="physical or unleveraged ETF; never leveraged ETFs or futures",

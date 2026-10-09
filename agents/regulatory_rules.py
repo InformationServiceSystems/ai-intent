@@ -99,7 +99,7 @@ STOCKS_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MANIFEST_STOCKS_NO_LEVERAGE",
-        description="No margin trading, short selling, or leveraged equity products.",
+        description="No margin trading, short selling, leveraged equity products or derivatives (futures, options, swaps, CFDs).",
         applies_to=["stocks"],
         check_type="deterministic",
         severity="block",
@@ -151,7 +151,7 @@ BONDS_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MANIFEST_BONDS_NO_EM",
-        description="No emerging market sovereign or corporate debt.",
+        description="No emerging, frontier or developing market sovereign or corporate debt.",
         applies_to=["bonds"],
         check_type="deterministic",
         severity="block",
@@ -195,7 +195,7 @@ MATERIALS_RULES: list[RegulatoryRule] = [
     ),
     RegulatoryRule(
         rule_id="MANIFEST_MATERIALS_NO_LEVERAGE",
-        description="No leveraged commodity ETFs or futures contracts.",
+        description="No leveraged commodity ETFs, futures contracts or other derivatives (options, swaps, CFDs), and no margin or short positions.",
         applies_to=["materials"],
         check_type="deterministic",
         severity="block",
