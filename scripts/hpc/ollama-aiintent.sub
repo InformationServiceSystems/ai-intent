@@ -21,9 +21,10 @@ log               = ollama-aiintent.log
 request_memory    = 32G
 request_cpus      = 8
 request_gpus      = 1
-request_disk      = 25G
-# Any GPU node will do for an 8B model, except V100/P100 (compute capability
-# below 7.5, dropped by current Ollama builds). Prefer large-memory cards.
-Requirements = (TARGET.GPUs >= 1) && !regexp("V100|P100", GPUs_DeviceName)
+request_disk      = 90G
+# Excludes V100/P100 (compute capability below 7.5, dropped by current Ollama
+# builds). At least 46 GB of GPU memory so that llama3.3:70b (ROADMAP 3.1) fits
+# next to the 8B model's campaigns; the disk request covers both model stores.
+Requirements = (TARGET.GPUs >= 1) && !regexp("V100|P100", GPUs_DeviceName) && (TARGET.GPUs_GlobalMemoryMb >= 46000)
 Rank = regexp("H200", GPUs_DeviceName) * 4 + regexp("RTX PRO 6000", GPUs_DeviceName) * 3 + regexp("A100-SXM4-80GB", GPUs_DeviceName) * 3 + regexp("A100", GPUs_DeviceName) * 2
 queue
