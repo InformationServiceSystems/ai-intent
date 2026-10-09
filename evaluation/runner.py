@@ -167,11 +167,24 @@ def score_atc(result: OrchestrationResult, session_messages: list | None = None)
             required_rules.update(v.get("violated_rules") or [])
     has_rule_ids = all(r in note for r in required_rules)
 
-    has_figure = bool(re.search(r"\d+(?:\.\d+)?\s*%", result.final_recommendation))
+    # A figure in the domain's quantified forms (percent, amounts, durations); vacuous when every specialist declined or was blocked.
+    domain = get_domain()
+    contributed = [a for a, r in result.sub_agent_results.items()
+                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")]
+    has_figure = (not contributed) or any(re.search(pat, result.final_recommendation) for pat in domain.quantified_patterns)
 
     if agents_mentioned >= len(result.agents_consulted) and has_figure and has_rule_ids:
         return 2
     return 1
+
+
+def declined_naming_constraint(result: OrchestrationResult, tc: dict) -> bool:
+    """Every routed specialist declined and the gate saw no structured content to reject: CDA was not exercised."""
+    routed = [a for a in tc.get("expected_routing", []) if a in result.sub_agent_results]
+    if not routed or not all(result.sub_agent_results[a].get("out_of_scope") is True for a in routed):
+        return False
+    rejected = any(v.get("overall_status") != "approved" for v in result.compliance_verdicts if v.get("checkpoint") == "analysis")
+    return not rejected and score_me(result, dict(tc, expected_out_of_scope=True)) == 2
 
 
 def score_me(result: OrchestrationResult, tc: dict) -> int | None:
@@ -357,7 +370,11 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
         if dim == "ME":
             scores[dim] = score_me(result, tc)
         elif dim == "CDA":
-            scores[dim], cda_notes = score_cda(result, tc.get("expected_rule_ids", []), messages)
+            if tc.get("expected_rule_ids") and declined_naming_constraint(result, tc):
+                scores[dim], cda_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                scores["ME"] = 2
+            else:
+                scores[dim], cda_notes = score_cda(result, tc.get("expected_rule_ids", []), messages)
         elif dim == "ATC":
             scores[dim] = score_atc(result, messages)
         elif dim == "DC":
@@ -367,7 +384,11 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
         elif dim == "CGP":
             scores[dim] = score_cgp(result, messages)
         elif dim == "SP":
-            scores[dim], sp_notes = score_sp(result, tc)
+            if tc.get("expected_state_rule_ids") and declined_naming_constraint(result, tc):
+                scores[dim], sp_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                scores["ME"] = 2
+            else:
+                scores[dim], sp_notes = score_sp(result, tc)
 
     applicable_scores = {k: v for k, v in scores.items() if v is not None}
     total = sum(applicable_scores.values())

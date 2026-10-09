@@ -140,6 +140,7 @@ async def run(
             sub_query = routing.get(f"query_for_{agent_id}")
             if not isinstance(sub_query, str) or not sub_query.strip():
                 sub_query = query_clean
+            sub_query += _state_context(agent_id, session_state)
             tasks.append(compliance.route(
                 agent_id, agent_funcs[agent_id], sub_query, session_id,
                 disposition=dispositions.get(agent_id), state=session_state,
@@ -302,6 +303,22 @@ async def run(
 
     compliance._max_revisions = base_max_revisions
     return orch_result
+
+
+def _state_context(agent_id: str, state: SessionState) -> str:
+    """The session state the agent's state predicates will compare with, appended to its sub-question (ROADMAP 1.1)."""
+    domain = get_domain()
+    keys = {s.state_key for s in domain.specs_for(agent_id) if s.kind in ("drift", "state_max") and s.state_key}
+    if not keys:
+        return ""
+    lines = []
+    for k in sorted(keys):
+        cur, tgt = state.current.get(k), state.target.get(k)
+        part = f"{k}: currently {cur * 100:.0f}% of the portfolio or budget" if cur is not None else f"{k}: current share unknown"
+        if tgt is not None:
+            part += f", target {tgt * 100:.0f}%"
+        lines.append(part)
+    return "\n\n[SESSION STATE — your proposal is checked against it]\n" + "\n".join(lines)
 
 
 async def _route_with_compliance(

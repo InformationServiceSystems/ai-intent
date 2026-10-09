@@ -44,7 +44,11 @@ def rescore(prefix: str) -> dict:
             elif dim == "ME":
                 scores[dim] = runner.score_me(result, tc)
             elif dim == "CDA":
-                scores[dim], cda_notes = runner.score_cda(result, tc.get("expected_rule_ids", []), messages)
+                if tc.get("expected_rule_ids") and runner.declined_naming_constraint(result, tc):
+                    scores[dim], cda_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                    scores["ME"] = 2
+                else:
+                    scores[dim], cda_notes = runner.score_cda(result, tc.get("expected_rule_ids", []), messages)
             elif dim == "ATC":
                 scores[dim] = runner.score_atc(result, messages)
             elif dim == "DC":
@@ -54,7 +58,11 @@ def rescore(prefix: str) -> dict:
             elif dim == "CGP":
                 scores[dim] = runner.score_cgp(result, messages)
             elif dim == "SP":
-                scores[dim], sp_notes = runner.score_sp(result, tc)
+                if tc.get("expected_state_rule_ids") and runner.declined_naming_constraint(result, tc):
+                    scores[dim], sp_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                    scores["ME"] = 2
+                else:
+                    scores[dim], sp_notes = runner.score_sp(result, tc)
         applicable = {k: v for k, v in scores.items() if v is not None}
         r.update({
             "scores": scores, "total": sum(applicable.values()), "max_possible": len(applicable) * 2,

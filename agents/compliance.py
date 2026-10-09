@@ -469,6 +469,35 @@ def _check_boundary_constraints(agent_id: str, payload: dict[str, Any], state: S
     return [_evaluate_boundary_constraint(bc, payload, manifest, state) for bc in domain.boundary_constraints(agent_id)]
 
 
+def _has_structured_content(raw: Any) -> bool:
+    """Whether a typed field carries content a decline could still be proposing (placeholders excluded)."""
+    if isinstance(raw, list):
+        return _structured_items(raw) is not None
+    if isinstance(raw, dict):
+        return bool(raw)
+    if isinstance(raw, bool) or raw is None:
+        return False
+    num = _as_number(raw)
+    return num is not None and num > 0
+
+
+def _check_declined_content(agent_id: str, payload: dict[str, Any], state: SessionState | None = None) -> list[RuleResult]:
+    """Prohibitions evaluated on the structured content of a declined response; obligations and prose are out of scope for a decline."""
+    domain = get_domain()
+    manifest = domain.manifest(agent_id)
+    results: list[RuleResult] = []
+    for bc in domain.boundary_constraints(agent_id):
+        p = bc.predicate
+        if bc.deontic_type != "F" or not p.structured_field or not _has_structured_content(payload.get(p.structured_field)):
+            continue
+        if "scope" in bc.tags:
+            continue  # a scope boundary is the reason for the decline, not a breach by it (the mixed contract of PC-04)
+        r = _evaluate_boundary_constraint(bc, payload, manifest, state)
+        r.detail = f"{r.detail} [declined response]"
+        results.append(r)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Deterministic checks — routing
 # ---------------------------------------------------------------------------
@@ -793,12 +822,18 @@ def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any])
     ))
 
     has_number = any(re.search(pat, recommendation) for pat in domain.quantified_patterns)
+    # Nothing to quantify when every consulted specialist declined or was blocked: the synthesis
+    # then reports the declines, and the obligation is vacuous (logged as such, not silently passed).
+    contributed = [a for a, r in sub_agent_results.items()
+                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")]
+    vacuous = bool(sub_agent_results) and not contributed
     results.append(RuleResult(
         rule="Final recommendation must contain specific quantified guidance",
         rule_id=f"{prefix}_ACTIONABLE_OUTPUT", source="deterministic",
-        passed=has_number,
-        detail="Recommendation contains only qualitative language — no allocation percentages, durations, or ratings found"
-               if not has_number else "Quantified guidance present",
+        passed=has_number or vacuous,
+        detail="Quantified guidance present" if has_number
+               else "Not applicable: every consulted specialist declined or was blocked" if vacuous
+               else "Recommendation contains only qualitative language — no allocation percentages, durations, or ratings found",
         regulatory_basis=f"{basis} / MiFID II Art. 24" if domain.domain_id == "finance" else basis,
     ))
 
@@ -997,6 +1032,12 @@ class ComplianceAgent:
             return self._error_verdict(agent_id, analysis_payload, session_id, revision_count)
 
         if analysis_payload.get("out_of_scope") is True:
+            # A decline is compliant, but structured content it still proposes is not exempt:
+            # prohibitions are evaluated on the typed fields only (no prose, no obligations), so a
+            # decline that names the requested figure in its text is never penalised.
+            declined = _check_declined_content(agent_id, analysis_payload, state)
+            if any(not r.passed for r in declined):
+                return self._build_verdict(declined, [], "analysis", agent_id, session_id, revision_count)
             return self._decline_verdict(agent_id, session_id, revision_count)
 
         det_results = _check_analysis(agent_id, analysis_payload, state)
