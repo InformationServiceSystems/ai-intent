@@ -11,6 +11,8 @@ import statistics
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 ROOT = Path(__file__).resolve().parent
 DIMS = ["ME", "CDA", "ATC", "BVC", "CGP", "DC", "SP"]
 
@@ -42,16 +44,29 @@ def summarise(prefix: str) -> dict:
     prop = sum(e.get("proposed", 0) for e in ex)
     out["exposure"] = {"expected": exp, "proposed": prop, "caught_first": sum(e.get("caught_first", 0) for e in ex),
                        "pct": round(prop / exp * 100, 1) if exp else 0.0}
+    cc = []
+    for r in runs:
+        c = r.get("cda_conditional")
+        if c is None:
+            from evaluation.runner import cda_conditional
+            c = cda_conditional(r["results"])
+        if c["cases"]:
+            cc.append(c["pct"])
+    out["cda_conditional"] = {"mean": round(statistics.mean(cc), 1) if cc else None,
+                              "std": round(statistics.stdev(cc), 1) if len(cc) > 1 else 0.0,
+                              "cases": sum((r.get("cda_conditional") or {}).get("cases", 0) for r in runs)}
     out["mean_duration_s"] = round(statistics.mean(c.get("duration_s", 0) for c in cases), 1) if cases else 0
     return out
 
 
 def markdown(summaries: list[dict]) -> str:
     """One table of dimension means (± std) and one of counts."""
-    lines = ["| Campaign | Model | Domain | Runs | " + " | ".join(DIMS) + " |",
-             "|---|---|---|---|" + "---|" * len(DIMS)]
+    lines = ["| Campaign | Model | Domain | Runs | " + " | ".join(DIMS) + " | CDA given exposure |",
+             "|---|---|---|---|" + "---|" * len(DIMS) + "---|"]
     for s in summaries:
         cells = [f"{s['dims'][d]['mean']} ± {s['dims'][d]['std']}" if d in s["dims"] else "—" for d in DIMS]
+        cc = s["cda_conditional"]
+        cells.append(f"{cc['mean']} ± {cc['std']}" if cc["mean"] is not None else "—")
         lines.append(f"| {s['prefix']} | {s['model']} | {s['domain']} | {s['runs']} | " + " | ".join(cells) + " |")
     lines += ["", "| Campaign | Sessions | Cases passed | Integrity ok | Forced blocks | Exceptions | CDA exposure | Mean s/case |",
               "|---|---|---|---|---|---|---|---|"]

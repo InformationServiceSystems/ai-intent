@@ -12,6 +12,27 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def preflight(base_url: str, model: str) -> str | None:
+    """Ask the endpoint for one short completion with the model; return an error text, or None if it answered.
+
+    Without this check a broken tunnel turns every LLM call into an error result that the gate
+    rejects, and the campaign completes with plausible-looking but meaningless scores.
+    """
+    import json
+    import urllib.request
+    req = urllib.request.Request(
+        base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps({"model": model, "messages": [{"role": "user", "content": "Say ok"}], "max_tokens": 5}).encode(),
+        headers={"Content-Type": "application/json", "Authorization": "Bearer ollama"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=900) as resp:
+            body = json.loads(resp.read())
+        return None if body.get("choices") else f"no choices in response: {str(body)[:200]}"
+    except Exception as e:  # unreachable host, refused tunnel, unknown model
+        return str(e)
+
+
 def main() -> int:
     """Start the workers, wait for all of them, and report exit codes."""
     parser = argparse.ArgumentParser(description="parallel evaluation workers")
@@ -23,6 +44,13 @@ def main() -> int:
     parser.add_argument("--deterministic-routing", action="store_true", help="pass --deterministic-routing to every worker")
     parser.add_argument("--domain", default=None, help="domain package under domains/ (default: finance)")
     args = parser.parse_args()
+
+    model = os.getenv("LLM_MODEL", "llama3.1:8b")
+    error = preflight(args.base_url, model)
+    if error:
+        print(f"preflight failed for {model} at {args.base_url}: {error}")
+        return 3
+    print(f"preflight ok: {model} at {args.base_url}")
 
     logs = ROOT / "evaluation" / "logs"
     logs.mkdir(exist_ok=True)

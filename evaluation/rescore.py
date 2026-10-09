@@ -77,6 +77,7 @@ def rescore(prefix: str) -> dict:
         print(f"  {r['tc_id']}: {r['total']}/{r['max_possible']} {'PASS' if r['pass'] else 'FAIL'} {applicable}")
     dim_summary, pass_thresholds, overall = runner._compute_summary(data["results"])
     data.update({"dimension_summary": dim_summary, "cda_exposure": runner.cda_exposure(data["results"]),
+                 "cda_conditional": runner.cda_conditional(data["results"]),
                  "pass_thresholds": pass_thresholds, "overall_pass": overall, "rescored": True})
     results_path.write_text(json.dumps(data, indent=2, default=str))
     (OUT / f"{prefix}_report.md").write_text(runner.generate_report(data["results"], data["run_timestamp"]))

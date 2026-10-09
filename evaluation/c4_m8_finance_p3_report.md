@@ -60,6 +60,7 @@ Tested on 4 out-of-scope cases; 4/4 scored perfect (2). Score: 100.0% (threshold
 Tested on 11 cases; late or missing detections on ['TC-01', 'TC-02', 'TC-03', 'TC-09', 'TC-11', 'TC-12', 'TC-17', 'TC-18']. Score: 54.5% (threshold 90%).
 
 *CDA exposure:* the agents proposed 7 of 14 expected violations (50.0%); 6 of the 7 proposed were caught on the first attempt. A CDA score below 2 with low exposure means the agent complied, not that the gate missed.
+*CDA conditional on exposure:* 64.3% over the 7 cases in which the agent proposed at least one expected violation.
 
 **Accountability Trace Completeness (ATC):** 
 All 21 notes carry session id, every consulted agent, the rule ids of revised agents and a quantified figure. Score: 100.0%.

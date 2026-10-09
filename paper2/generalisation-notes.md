@@ -129,37 +129,40 @@ ME also counts a decline as naming the constraint when it uses a distinctive wor
 
 **Sleep.** During the first full finance run the machine slept for about two hours (TC-12, TC-13); the runs now use `caffeinate`.
 
-## 7. Ten-run campaigns on both domains with two models (9 October 2026, HPC)
+## 7. Ten-run campaigns on both domains with three models (9 October 2026, HPC)
 
-Four campaigns, each ten independent runs of the full suite with deterministic routing, one RTX PRO 6000 Blackwell (97 GB) on `forseti`, Ollama 0.40.2 with the context capped at 8192 tokens: finance (21 cases) and procurement (12 cases), each with `llama3.1:8b` (continuity with ER 2026) and `llama3.3:70b` (ROADMAP 3.1). Prefix `c4_`; `python evaluation/campaign_summary.py c4_m8_finance c4_m70_finance c4_m8_procurement c4_m70_procurement`. Run percentages, mean ± standard deviation over ten runs:
+Six campaigns, each ten independent runs of the full suite with deterministic routing, one RTX PRO 6000 Blackwell (97 GB) on `forseti`, Ollama 0.40.2 with the context capped at 8192 tokens: finance (21 cases) and procurement (12 cases), each with `llama3.1:8b` (continuity with ER 2026), `llama3.3:70b` and `qwen2.5:72b` (ROADMAP 3.1, the second outside the Llama family). Prefix `c4_`; `python evaluation/campaign_summary.py c4_m8_finance c4_m70_finance c4_q72_finance c4_m8_procurement c4_m70_procurement c4_q72_procurement`. Run percentages, mean ± standard deviation over ten runs:
 
-| Campaign | Model | Domain | Runs | ME | CDA | ATC | BVC | CGP | DC | SP |
-|---|---|---|---|---|---|---|---|---|---|---|
-| c4_m8_finance | llama3.1:8b | finance | 10 | 87.2 ± 18.2 | 63.3 ± 8.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 68.8 ± 6.6 | 97.5 ± 7.9 |
-| c4_m70_finance | llama3.3:70b | finance | 10 | 100.0 ± 0.0 | 57.7 ± 3.4 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 63.8 ± 4.0 | 90.0 ± 22.4 |
-| c4_m8_procurement | llama3.1:8b | procurement | 10 | 100.0 ± 0.0 | 76.2 ± 17.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 100.0 ± 0.0 |
-| c4_m70_procurement | llama3.3:70b | procurement | 10 | 100.0 ± 0.0 | 77.5 ± 8.3 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 90.0 ± 21.1 |
+| Campaign | Model | Domain | Runs | ME | CDA | ATC | BVC | CGP | DC | SP | CDA given exposure |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| c4_m8_finance | llama3.1:8b | finance | 10 | 87.2 ± 18.2 | 63.3 ± 8.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 68.8 ± 6.6 | 97.5 ± 7.9 | 79.7 ± 11.2 |
+| c4_m70_finance | llama3.3:70b | finance | 10 | 100.0 ± 0.0 | 57.7 ± 3.4 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 63.8 ± 4.0 | 90.0 ± 22.4 | 70.4 ± 7.4 |
+| c4_q72_finance | qwen2.5:72b | finance | 10 | 100.0 ± 0.0 | 49.3 ± 5.3 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 68.8 ± 6.6 | 92.9 ± 18.9 | 75.0 ± 12.4 |
+| c4_m8_procurement | llama3.1:8b | procurement | 10 | 100.0 ± 0.0 | 76.2 ± 17.6 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 100.0 ± 0.0 | 88.3 ± 13.1 |
+| c4_m70_procurement | llama3.3:70b | procurement | 10 | 100.0 ± 0.0 | 77.5 ± 8.3 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 90.0 ± 21.1 | 88.0 ± 8.7 |
+| c4_q72_procurement | qwen2.5:72b | procurement | 10 | 100.0 ± 0.0 | 76.8 ± 7.7 | 100.0 ± 0.0 | 100.0 ± 0.0 | 100.0 ± 0.0 | 50.0 ± 0.0 | 80.0 ± 27.4 | 92.5 ± 8.1 |
 
 | Campaign | Sessions | Cases passed | Integrity ok | Forced blocks | Exceptions | CDA exposure | Mean s/case |
 |---|---|---|---|---|---|---|---|
 | c4_m8_finance | 210 | 187 | 210 | 30 | 0 | 65 of 136 (47.8 %), 61 on attempt 1 | 13.9 |
 | c4_m70_finance | 210 | 197 | 210 | 9 | 0 | 32 of 85 (37.6 %), 31 on attempt 1 | 46.4 |
+| c4_q72_finance | 210 | 189 | 210 | 3 | 0 | 20 of 84 (23.8 %), 19 on attempt 1 | 44.9 |
 | c4_m8_procurement | 120 | 118 | 120 | 10 | 0 | 29 of 40 (72.5 %), 22 on attempt 1 | 10.0 |
 | c4_m70_procurement | 120 | 118 | 120 | 14 | 0 | 50 of 74 (67.6 %), 47 on attempt 1 | 43.6 |
+| c4_q72_procurement | 120 | 119 | 120 | 8 | 0 | 27 of 43 (62.8 %), 26 on attempt 1 | 49.5 |
 
 
-**What holds regardless of model and domain.** BVC, CGP and ATC are 100 % in every one of the 40 runs, all eight trace invariants hold on all 660 sessions, and no run raised an exception. The structural guarantees of the gate do not depend on the model or the domain; this is the result ROADMAP 3.1 set out to test.
+**What holds regardless of model and domain.** BVC, CGP and ATC are 100 % in every one of the 60 runs, all eight trace invariants hold on all 990 sessions, no run raised an exception, and no specialist returned an error result. The structural guarantees of the gate depend neither on the model, nor on the model family, nor on the domain; this is the result ROADMAP 3.1 set out to test.
 
-**What changes with the model.** The 70B model proposes fewer of the expected violations in finance (exposure 37.6 % against 47.8 %), needs fewer forced blocks (9 against 30 in 210 sessions) and declines out-of-scope requests reliably (ME 100 % in every run against 87.2 ± 18.2 %). It is about three times slower per case. In procurement the two models are close: exposure 67.6 % and 72.5 %, CDA 77.5 % and 76.2 %; the 70B model reaches the gate more often (74 expected violations scored against 40, because the 8B model declines more procurement cases, which are then scored under ME).
+**What changes with the model.** The larger models decline out-of-scope requests reliably (ME 100 % in every run, against 87.2 ± 18.2 % for the 8B model in finance) and propose fewer of the expected violations: finance exposure falls from 47.8 % (8B) to 37.6 % (Llama 70B) and 23.8 % (Qwen 72B), and forced blocks from 30 to 9 and 3 in 210 sessions. They are about three times slower per case. In procurement exposure stays between 63 % and 73 % for all three models.
 
-**Reading CDA and DC.** CDA stays between 58 % and 78 % for both models because it scores expected violations an agent often does not propose; of the violations actually proposed, 91 % (8B finance: 61 of 65) to 97 % (70B finance: 31 of 32) were rejected on the first attempt, and the remainder on a later attempt when they were first proposed there. DC 50 % in procurement is one case per run (PC-11, aggressive preset) contained after one revision, scored 1 by definition; it never scored 0.
+**Reading CDA.** CDA under the ER 2026 rubric falls as the model improves (finance 63.3 %, 57.7 %, 49.3 %) because a better model proposes fewer of the violations a case expects; every CDA 0 in the Qwen campaigns is a case whose agent complied (TC-01 and TC-03 in all ten runs). Conditional on exposure, CDA is 70 % to 93 % across all six campaigns; of the expected violations actually proposed, 91 % to 97 % were rejected on the first attempt and the rest on the attempt that first proposed them. The ER 2026 rubric therefore measures the agent as much as the gate; the paper should report CDA conditional on exposure next to it, with the exposure rate.
 
-**SP spread.** SP has one or two applicable cases per run, so one run with SP 1 moves the run percentage by 25 to 50 points. In each 70B campaign one run had the agent propose no allocation, so the state predicate was evaluated vacuously (TC-21 in finance; the analogous procurement case). The predicate never failed to fire when an allocation was proposed.
+**Reading DC and SP.** DC 1 means a preset produced at least one revision and was contained; it never scored 0. SP has one or two applicable cases per run, so one run in which the agent proposed no allocation (the predicate evaluated vacuously) moves the run percentage by 25 to 50 points; the predicate never failed to fire when an allocation was proposed.
 
-**Infrastructure note.** The first job was killed while loading the 70B model: Ollama 0.40 sizes the KV cache for the model's full context times the ten parallel slots (325 GB). `OLLAMA_CONTEXT_LENGTH=8192` and `request_memory = 64G` in `scripts/hpc/ollama-aiintent.sub` fix it; the ER 2026 campaigns ran with an older default context.
+**Infrastructure notes.** The first 70B job was killed while loading: Ollama 0.40 sizes the KV cache for the model's full context times the ten parallel slots (325 GB); `OLLAMA_CONTEXT_LENGTH=8192` and `request_memory = 64G` fix it. A first Qwen attempt ran against a tunnel to a non-existent host because the job was still queued when the wait loop expired; every LLM call failed, the gate rejected the error results, and the campaign completed with plausible-looking scores. It was discarded, and `run_parallel.py` now asks the endpoint for one completion with the model before starting any worker and aborts if none comes.
 
 ## 8. Open points for the author
 
 - Whether the four default decisions of section 5 are the ones the paper should state.
-- Whether the paper reports CDA conditional on exposure (section 7) instead of the ER 2026 rubric alone.
 - The neutral preset's conformist score of 0.5 triggers the conformist integrity check (TC-21, `DISPOSITION_CONFORMIST_DISSENT` on a buy without flags). This is the ER 2026 setting and is left unchanged.

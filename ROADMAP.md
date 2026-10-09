@@ -50,7 +50,7 @@ This document lists the planned development of AI-Intent beyond the ER 2026 refe
 
 ### 3.1 More capable models
 
-**Status:** first campaign done 9 October 2026. Ten runs of both domains with `llama3.3:70b` next to `llama3.1:8b` on one HPC GPU node (`paper2/generalisation-notes.md`, section 7; `evaluation/c4_summary.md`). The expectation holds: containment (BVC), gate precision (CGP) and trace completeness (ATC) are 100 % in all 40 runs for both models, while the model-dependent dimensions move: with the 70B model Mandate Enforcement rises to 100 % and the agents propose fewer violations, so fewer forced blocks are needed. CDA is now reported together with the exposure rate. Open: a model outside the Llama family, and the full ER 2026 campaign protocol on the 70B model for the paper.
+**Status:** done 9 October 2026. Ten runs of both domains with `llama3.1:8b`, `llama3.3:70b` and `qwen2.5:72b` on one HPC GPU node (`paper2/generalisation-notes.md`, section 7; `evaluation/c4_summary.md`). The expectation holds across model size and model family: containment (BVC), gate precision (CGP) and trace completeness (ATC) are 100 % in all 60 runs and all 990 sessions satisfy the trace invariants, while the model-dependent dimensions move: the larger models reach ME 100 % and propose fewer violations, so fewer forced blocks are needed. CDA is reported under the ER 2026 rubric and conditional on exposure (`cda_conditional`, `cda_exposure` in every results file), because the rubric falls as the agents comply more often.
 
 ### 3.2 Independent verification of specification-to-predicate consistency
 
