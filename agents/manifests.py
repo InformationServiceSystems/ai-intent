@@ -566,6 +566,7 @@ def manifest_to_system_prompt(manifest: AgentManifest, disposition: DispositionP
         + ". Report your true confidence honestly; do not inflate it to avoid escalation.\n\n"
     )
 
+    exceptions_text = _exceptions_prompt(manifest)
     base = (
         f"Agent: {manifest.name} ({manifest.agent_id})\n"
         f"Role: {manifest.role}\n"
@@ -573,6 +574,7 @@ def manifest_to_system_prompt(manifest: AgentManifest, disposition: DispositionP
         f"({_decision_right_blurb(manifest.decision_right)})\n\n"
         f"Intent Scope:\n  {manifest.intent_scope}\n\n"
         f"Boundary Constraints:\n{constraints}\n\n"
+        f"{exceptions_text}"
         f"Risk Parameters:\n{params}\n\n"
         f"{uncertainty_line}"
         f"Summary: {manifest.plain_language_summary}\n\n"
@@ -588,6 +590,36 @@ def manifest_to_system_prompt(manifest: AgentManifest, disposition: DispositionP
         base += f"\n\n{disposition_text}"
 
     return base
+
+
+def _exceptions_prompt(manifest: AgentManifest) -> str:
+    """The norm exceptions that defeat this agent's constraints, as part of its Mandate (ROADMAP 1.3).
+
+    An agent that does not know an exception declines what the Mandate permits; the first clinical
+    campaign showed this for every exception case, so the exceptions belong in the prompt as well as in the gate.
+    """
+    domain = _active_domain()
+    if domain is None or not getattr(domain, "exceptions", None):
+        return ""
+    own = {s.rule_id: s for s in domain.specs_for(manifest.agent_id)}
+    lines = []
+    for exc in sorted(domain.exceptions, key=lambda e: -e.priority):
+        if exc.defeats not in own:
+            continue
+        cond = []
+        if exc.when_key:
+            cond.append(f"applies to an item whose {exc.when_key} names {', '.join(exc.when_values)}")
+        if exc.when_field:
+            cond.append(f"applies when you set \"{exc.when_field}\" to true")
+        if exc.requires_field:
+            cond.append(f"and only with the documentation reference in \"{exc.requires_field}\"")
+        if exc.effect == "bound" and exc.bound_param_key:
+            cond.append(f"bound: {exc.bound_param_key} = {manifest.risk_parameters.get(exc.bound_param_key)}")
+        lines.append(f"  - {exc.exception_id} (defeats '{own[exc.defeats].variable}'): {exc.description}; " + "; ".join(cond))
+    if not lines:
+        return ""
+    return ("Exceptions (stronger norms; when one applies, the constraint it defeats does not bind as stated, "
+            "and you should not decline on that constraint):\n" + "\n".join(lines) + "\n\n")
 
 
 def _decision_right_blurb(dr: DecisionRight) -> str:

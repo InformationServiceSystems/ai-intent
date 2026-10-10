@@ -985,15 +985,20 @@ def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any])
     has_number = any(re.search(pat, recommendation) for pat in domain.quantified_patterns)
     # Nothing to quantify when every consulted specialist declined or was blocked: the synthesis
     # then reports the declines, and the obligation is vacuous (logged as such, not silently passed).
+    # A specialist contributes something to quantify if it was delivered and either recommends acting or
+    # returned typed items; a delivered "hold" without orders leaves nothing to quantify (clinical campaign, CL-08).
+    def _has_items(r: dict) -> bool:
+        return any(isinstance(v, list) and any(isinstance(i, dict) for i in v) for k, v in r.items() if k != "proposed_allocation")
     contributed = [a for a, r in sub_agent_results.items()
-                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")]
+                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")
+                   and (r.get("recommendation") == domain.active_recommendation or _has_items(r))]
     vacuous = bool(sub_agent_results) and not contributed
     results.append(RuleResult(
         rule="Final recommendation must contain specific quantified guidance",
         rule_id=f"{prefix}_ACTIONABLE_OUTPUT", source="deterministic",
         passed=has_number or vacuous,
         detail="Quantified guidance present" if has_number
-               else "Not applicable: every consulted specialist declined or was blocked" if vacuous
+               else "Not applicable: no specialist delivered a recommendation to quantify" if vacuous
                else "Recommendation contains only qualitative language — no allocation percentages, durations, or ratings found",
         regulatory_basis=f"{basis} / MiFID II Art. 24" if domain.domain_id == "finance" else basis,
     ))

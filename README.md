@@ -87,7 +87,7 @@ To change the model, set `LLM_MODEL` in a `.env` file (see `.env.example`) or in
 LLM_MODEL=llama3.1:70b streamlit run app.py
 ```
 
-The domain is chosen in the sidebar or with `AI_INTENT_DOMAIN` (default `finance`; `procurement` is the second domain):
+The domain is chosen in the sidebar or with `AI_INTENT_DOMAIN` (default `finance`; `procurement` and `clinical` are the second and third domains):
 ```bash
 AI_INTENT_DOMAIN=procurement streamlit run app.py
 ```
@@ -112,16 +112,19 @@ ai-intent/
 │   ├── accountability.py       # Accountability note as a projection of the trace
 │   ├── delegation.py           # UFO-C delegation chain, containment checks
 │   ├── dispositions.py         # Standard preset table, tag-based manifestation attribution
+│   ├── norms.py                # Norm exceptions (defeasible norms) and Principal amendments
 │   ├── specialist.py           # The one generic specialist agent
 │   └── stocks.py, bonds.py, materials.py   # one-line bindings of the finance specialists
 │
 ├── domains/
 │   ├── finance.py              # Private investment under MiFID II (ER 2026 reference domain)
-│   └── procurement.py          # Public procurement under Directive 2014/24/EU
+│   ├── procurement.py          # Public procurement under Directive 2014/24/EU
+│   └── clinical.py             # Medication review with norm exceptions (illustrative, not clinical guidance)
 │
 ├── mcp/
 │   ├── logger.py               # MCPMessage model + SQLite persistence
-│   └── gufo_export.py          # Session log as a gUFO-typed RDF graph
+│   ├── gufo_export.py          # Session log as a gUFO-typed RDF graph
+│   └── mandate_export.py       # A domain's Mandates in the OntoUML model's OWL vocabulary
 │
 ├── utils/
 │   └── llm.py                  # Shared LLM client (Ollama via OpenAI-compatible API)
@@ -140,6 +143,9 @@ ai-intent/
 ├── evaluation/
 │   ├── runner.py               # Evaluation suite of the active domain (--domain, --cases, --dry-run), 7 dimensions
 │   ├── spec_consistency.py     # C1 to C4 over the active domain's constraints
+│   ├── design_checks.py        # D1 to D8: design-time checks over the OWL rendering of the Mandates
+│   ├── oracle_agreement.py     # Independent SHACL encoding of the Mandates compared with the gate
+│   ├── campaign_summary.py     # Aggregate parallel campaigns
 │   ├── sparql_checks.py        # Trace invariants as SPARQL queries
 │   ├── spot_check.py           # Quick single-case checks
 │   └── paper_analysis.py       # Aggregate analysis for the paper
@@ -186,8 +192,9 @@ See [`paper/evaluation-procedure.md`](paper/evaluation-procedure.md) for the ful
 The deterministic unit tests run without a model or network:
 
 ```bash
-python -m pytest tests -q          # 73 tests: oracle equivalence, specs, schemas, state predicates, both domains
-python evaluation/spec_consistency.py
+python -m pytest tests -q                         # deterministic tests: gate, specs, schemas, norms, three domains
+python evaluation/design_checks.py --all          # design-time checks D1 to D8 on every domain
+python evaluation/oracle_agreement.py --regate    # gate versus the independent SHACL encoding on the archived sessions
 AI_INTENT_DOMAIN=procurement python evaluation/spec_consistency.py
 ```
 
@@ -228,7 +235,11 @@ The sidebar provides preset behavioral profiles to test compliance enforcement:
 
 ## Roadmap
 
-Development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md). Done since: structured agent outputs, constraints as a single source, state predicates (the rebalancing trigger is checkable), the accountability note as a projection of the trace, and the generalisation of the kernel to a second domain. Open: defeasible norms, design-time checks over the OntoUML model, and the empirical follow-ups with more capable models.
+Development beyond the ER 2026 reference implementation is described in [ROADMAP.md](ROADMAP.md). All items are done as of 9 October 2026: structured agent outputs, constraints as a single source, state predicates, the accountability note as a projection of the trace, the generic kernel with a second and a third domain, defeasible norms and Mandate amendments, design-time checks over the OWL rendering of the Mandates, an independent second encoding compared with the gate, and ten-run campaigns with three models.
+
+### Defeasible norms, amendments and the third domain
+
+A boundary constraint may be defeated by a registered **norm exception**: for the items it covers it exempts them or applies its own bound, in priority order, and every application is recorded in the verdict and the trace. The Principal may **amend** a Mandate during a session; the amendment is admitted only if the Principal owns the Mandate, containment holds and the design checks stay clean, is logged before it takes effect, and applies to that session only. `domains/clinical.py` (illustrative, not clinical guidance) is the domain that needs both: restricted antibiotics with a documented approval, long courses for bone infections, the opioid ceiling under a palliative care plan, warfarin for a mechanical valve, and a committee amendment.
 
 ### Second domain: public procurement
 
