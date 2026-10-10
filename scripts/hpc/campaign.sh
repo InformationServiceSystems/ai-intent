@@ -12,7 +12,7 @@ for model in ${MODELS:-llama3.1:8b llama3.3:70b}; do
   for domain in ${DOMAINS:-finance procurement}; do
     echo "=== $model $domain $(date)"
     LLM_MODEL=$model python3 evaluation/run_parallel.py --workers 10 --prefix "${PREFIX:-c4}_${tag}_${domain}" \
-      --base-url "$BASE" --deterministic-routing --domain "$domain"
+      --base-url "$BASE" --deterministic-routing --domain "$domain" ${CASES:+--cases "$CASES"}
   done
 done
 echo "=== done $(date)"

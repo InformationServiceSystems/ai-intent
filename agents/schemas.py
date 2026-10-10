@@ -59,10 +59,25 @@ def derive_response_model(
     by_field: dict[str, list[ConstraintSpec]] = {}
     for s in own:
         by_field.setdefault(s.structured_field, []).append(s)  # type: ignore[arg-type]
+    # Item keys an exception's condition reads must be expressible in the item, or the exception can never apply
+    # (ROADMAP 1.3; the first clinical reruns could not state the indication of a warfarin order).
+    exception_keys: dict[str, list[str]] = {}
+    for exc in exceptions or []:
+        defeated = next((s for s in own if s.rule_id == exc.defeats and s.structured_field), None)
+        if defeated is not None and exc.when_key:
+            exception_keys.setdefault(defeated.structured_field, []).append(exc.when_key)
     for field_name, field_specs in by_field.items():
         shapes = {s.shape for s in field_specs}
         if "list" in shapes:
-            fields[field_name] = (list[_item_model(field_name, field_specs)], ...)  # type: ignore[valid-type]
+            item_specs = list(field_specs)
+            declared = {s.item_key for s in field_specs}
+            for key in exception_keys.get(field_name, []):
+                if key not in declared:
+                    item_specs.append(field_specs[0].model_copy(update={
+                        "item_key": key, "field_type": "string", "field_enum": None,
+                        "field_description": f"stated so that a documented exception can be applied ({key})"}))
+                    declared.add(key)
+            fields[field_name] = (list[_item_model(field_name, item_specs)], ...)  # type: ignore[valid-type]
         elif "map" in shapes:
             fields[field_name] = (dict[str, float], ...)
         else:

@@ -43,6 +43,7 @@ def main() -> int:
     parser.add_argument("--stagger", type=float, default=3.0, help="seconds between worker starts")
     parser.add_argument("--deterministic-routing", action="store_true", help="pass --deterministic-routing to every worker")
     parser.add_argument("--domain", default=None, help="domain package under domains/ (default: finance)")
+    parser.add_argument("--cases", default=None, help="comma-separated test case ids passed to every worker")
     args = parser.parse_args()
 
     model = os.getenv("LLM_MODEL", "llama3.1:8b")
@@ -69,6 +70,8 @@ def main() -> int:
             cmd.append("--deterministic-routing")
         if args.domain:
             cmd.extend(["--domain", args.domain])
+        if args.cases:
+            cmd.extend(["--cases", args.cases])
         log = open(logs / f"{args.prefix}_p{i}.log", "w")
         procs.append((i, subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)))
         print(f"worker {i}: pid {procs[-1][1].pid} -> {log.name}")

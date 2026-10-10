@@ -45,6 +45,18 @@ def test_domain_is_clean_and_disclaimed():
     assert all("NOT CLINICAL GUIDANCE" in CLIN.manifest(a).intent_scope for a in CLIN.specialist_ids)
 
 
+def test_d9_catches_an_inexpressible_exception():
+    """Without the exception keys in the derived schema, D9 reports the warfarin exception; with them it is clean."""
+    from agents.schemas import derive_response_model, response_format
+    from evaluation.design_checks import run_design_checks
+    d = CLIN.model_copy(deep=True)
+    d.specialists["anticoagulation"].response_format = response_format(
+        derive_response_model("anticoagulation", d.constraint_specs, ["recommend", "hold", "stop", "not_applicable"]))
+    assert any(f.check == "D9_EXCEPTION_EXPRESSIBLE" and f.subject == "EXC_WARFARIN_MECHANICAL_VALVE" for f in run_design_checks(d))
+    item = CLIN.specialists["anticoagulation"].response_format["json_schema"]["schema"]["$defs"]["OrdersItem"]
+    assert "indication" in item["properties"] and "indication" in item["required"]
+
+
 def test_restricted_antibiotic_needs_documented_approval():
     """Meropenem fails without approval, fails with the flag but no reference, passes with both."""
     assert _verdict("antimicrobial", _abx("meropenem", "ESBL bacteraemia", 10))["MANIFEST_ANTIMICROBIAL_RESTRICTED"].passed is False

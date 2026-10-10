@@ -132,6 +132,10 @@ CHECKS: list[DesignCheck] = [
         }""",
     ),
     DesignCheck(
+        check_id="D9_EXCEPTION_EXPRESSIBLE",
+        claim="Every exception's condition can be stated in the response schema of the agent it concerns (Python check)",
+    ),
+    DesignCheck(
         check_id="D7_MODEL_CARDINALITY",
         claim="The Mandate content satisfies the cardinality restrictions of the OntoUML model (closed world)",
     ),
@@ -192,6 +196,35 @@ def run_design_checks(domain: Domain, model_path: Path | None = ONTOUML) -> list
             findings.append(DesignFinding(check=check.check_id, subject=values[0], detail=", ".join(values[1:])))
     if model_path is not None and model_path.exists():
         findings += _cardinality_findings(data, Graph().parse(str(model_path)))
+    findings += _exception_expressibility(domain)
+    return findings
+
+
+def _exception_expressibility(domain: Domain) -> list[DesignFinding]:
+    """D9: every exception's condition fields can be stated in the response schema of the agent whose constraint it defeats.
+
+    Under constrained decoding a field the schema lacks cannot be emitted, so an exception that reads it can never apply.
+    """
+    findings: list[DesignFinding] = []
+    for exc in domain.exceptions:
+        spec = next((s for s in domain.constraint_specs if s.rule_id == exc.defeats), None)
+        if spec is None or spec.agent_id not in domain.specialists:
+            continue
+        schema = domain.specialists[spec.agent_id].response_format["json_schema"]["schema"]
+        props = schema.get("properties", {})
+        missing: list[str] = []
+        if exc.when_field and exc.when_field not in props:
+            missing.append(exc.when_field)
+        if exc.requires_field and exc.requires_field not in props:
+            missing.append(exc.requires_field)
+        if exc.when_key and spec.structured_field:
+            ref = (props.get(spec.structured_field, {}).get("items") or {}).get("$ref", "")
+            item = schema.get("$defs", {}).get(ref.split("/")[-1], {}) if ref else {}
+            if exc.when_key not in item.get("properties", {}):
+                missing.append(f"{spec.structured_field}[].{exc.when_key}")
+        if missing:
+            findings.append(DesignFinding(check="D9_EXCEPTION_EXPRESSIBLE", subject=exc.exception_id,
+                                          detail=f"the response schema of {spec.agent_id} cannot state {missing}"))
     return findings
 
 
