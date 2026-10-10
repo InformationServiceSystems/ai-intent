@@ -119,6 +119,48 @@ def check_text_matches_strictness(bc: BoundaryConstraint) -> list[Finding]:
     return []
 
 
+def _instruction_example(instruction: str) -> dict | None:
+    """The JSON example of a specialist instruction: the first balanced object after 'JSON format'."""
+    import json
+    start = instruction.find("{", max(instruction.find("JSON format"), 0))
+    depth = 0
+    for j in range(start, len(instruction)) if start >= 0 else ():
+        depth += {"{": 1, "}": -1}.get(instruction[j], 0)
+        if depth == 0:
+            try:
+                return json.loads(instruction[start:j + 1])
+            except ValueError:
+                return None
+    return None
+
+
+def check_example_matches_schema(agent_id: str) -> list[Finding]:
+    """C6: the JSON example in a specialist's instruction shows every field of its derived response schema (C6_MISSING),
+    and names no item field the schema does not declare (C6_EXTRA: harmless to verdicts, since no rule reads it,
+    but the example then asks for a field constrained decoding may not emit)."""
+    from agents.domain import get_domain
+    cfg = get_domain().specialists.get(agent_id)
+    if cfg is None:
+        return []
+    schema = cfg.response_format["json_schema"]["schema"]
+    example = _instruction_example(cfg.json_instruction)
+    if example is None:
+        return [Finding(check="C6_MISSING", rule_id="-", agent_id=agent_id, detail="instruction has no parseable JSON example")]
+    findings = [Finding(check="C6_MISSING", rule_id="-", agent_id=agent_id, detail=f"schema field '{k}' not in the example")
+                for k in schema["properties"] if k not in example]
+    for key, prop in schema["properties"].items():
+        ref = (prop.get("items") or {}).get("$ref")
+        if not ref or not example.get(key):
+            continue
+        declared = set(schema["$defs"][ref.split("/")[-1]]["properties"])
+        shown = set(example[key][0])
+        findings += [Finding(check="C6_MISSING", rule_id="-", agent_id=agent_id, detail=f"item field '{key}.{k}' not in the example")
+                     for k in sorted(declared - shown)]
+        findings += [Finding(check="C6_EXTRA", rule_id="-", agent_id=agent_id, detail=f"example item field '{key}.{k}' is not in the schema")
+                     for k in sorted(shown - declared)]
+    return findings
+
+
 def _alternatives(pattern: str) -> list[str]:
     """Reduce a regex of alternatives to plain lowercase stems for matching against the text."""
     cleaned = re.sub(r"\\b", "", pattern)
@@ -186,7 +228,7 @@ def check_manifest_coverage(agent_id: str) -> list[Finding]:
 
 
 def run_all() -> list[Finding]:
-    """Run C1 to C5 over every agent and constraint."""
+    """Run C1 to C6 over every agent and constraint."""
     findings: list[Finding] = []
     for agent_id, constraints in _index().items():
         for bc in constraints:
@@ -195,6 +237,7 @@ def run_all() -> list[Finding]:
             findings += check_text_names_terms(bc)
         findings += check_registry_matches_manifest(agent_id)
         findings += check_manifest_coverage(agent_id)
+        findings += check_example_matches_schema(agent_id)
     return findings
 
 
@@ -205,7 +248,7 @@ def main() -> int:
     print(f"{total} boundary constraints checked, {len(findings)} findings")
     for f in findings:
         print(f"  [{f.check}] {f.agent_id} {f.rule_id}: {f.detail}")
-    hard = [f for f in findings if f.check in ("C1_BOUND", "C2_TERMS", "C5_STRICT")]
+    hard = [f for f in findings if f.check in ("C1_BOUND", "C2_TERMS", "C5_STRICT", "C6_MISSING")]
     return 1 if hard else 0
 
 

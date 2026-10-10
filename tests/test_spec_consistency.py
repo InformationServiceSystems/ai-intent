@@ -56,3 +56,25 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"ok  {name}")
+
+
+def test_instruction_examples_match_derived_schemas():
+    """C6: every specialist's JSON example shows every field of its derived schema, in all three domains.
+    The extra example fields are pinned: no rule of these agents reads them, so they do not affect verdicts,
+    and removing them would change prompts the final campaign of 10 October 2026 ran on."""
+    from agents.domain import get_domain, load_domain, set_domain
+    previous = get_domain()
+    known_extra = {
+        "procurement": {("services", "lots.budget_share"), ("services", "lots.procedure"), ("services", "lots.share"),
+                        ("works", "lots.budget_share"), ("works", "lots.share")},
+        "clinical": {("analgesia", "orders.drug")},
+    }
+    try:
+        for name in ("finance", "procurement", "clinical"):
+            set_domain(load_domain(name))
+            findings = run_all()
+            assert [f.detail for f in findings if f.check == "C6_MISSING"] == [], name
+            extra = {(f.agent_id, f.detail.split("'")[1]) for f in findings if f.check == "C6_EXTRA"}
+            assert extra == known_extra.get(name, set()), name
+    finally:
+        set_domain(previous)

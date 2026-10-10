@@ -62,7 +62,7 @@ def test_spec_consistency_holds_for_the_second_domain():
         findings = spec_consistency.run_all()
     hard = [f for f in findings if f.check in ("C1_BOUND", "C2_TERMS", "C3_MANIFEST")]
     assert hard == [], [f.model_dump() for f in hard]
-    assert {f.agent_id for f in findings} <= {"supplies", "coordinator"}
+    assert {f.agent_id for f in findings if f.check != "C6_EXTRA"} <= {"supplies", "coordinator"}   # C6 extras: test_spec_consistency
 
 
 def test_mixed_contract_is_the_boundary_object():
