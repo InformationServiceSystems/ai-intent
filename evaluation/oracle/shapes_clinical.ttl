@@ -1,0 +1,85 @@
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <https://github.com/InformationServiceSystems/ai-intent/oracle#> .
+
+# Written from the clinical Mandate texts and the exception descriptions (domains/clinical.py prompts and manifests),
+# not from the gate's condition lists. Illustrative domain, not clinical guidance.
+
+# "Antibacterial agents only (agent type: antibacterial)"
+ex:AbxScope a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTIMICROBIAL_SCOPE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "antimicrobial" ; ex:orders ?o . OPTIONAL { ?o ex:agent_type ?t }
+      FILTER (!BOUND(?t) || LCASE(STR(?t)) != "antibacterial") }""" ] .
+
+# "Restricted antibiotics (...) require a documented infectious-diseases approval"
+# Exception: "A restricted antibiotic is permitted with a documented infectious-diseases approval"
+ex:AbxRestricted a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTIMICROBIAL_RESTRICTED" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "antimicrobial" ; ex:orders ?o . ?o ex:drug ?d .
+      FILTER (REGEX(?d, "meropenem|imipenem|ertapenem|linezolid|daptomycin|colistin|tigecycline", "i"))
+      FILTER NOT EXISTS { $this ex:id_approval_documented true ; ex:id_approval_reference ?ref . FILTER (STRLEN(STR(?ref)) > 0) } }""" ] .
+
+# "No antibiotic course longer than 14 days"
+# Exception: "Bone, joint and endovascular infections may need courses up to the long-course bound" (42 days)
+ex:AbxDuration a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTIMICROBIAL_DURATION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "antimicrobial" ; ex:orders ?o . ?o ex:duration_days ?days .
+      OPTIONAL { ?o ex:indication ?i }
+      BIND (BOUND(?i) && REGEX(?i, "bone|joint|osteomyelitis|arthritis|endocard|endovascular", "i") AS ?long)
+      FILTER ((!?long && ?days > 14) || (?long && ?days > 42)) }""" ] .
+
+# "Every antibiotic order must state its indication"
+ex:AbxIndication a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTIMICROBIAL_INDICATION" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "antimicrobial" ; ex:orders ?o . FILTER NOT EXISTS { ?o ex:indication ?i . FILTER (STRLEN(STR(?i)) > 0) } }""" ] .
+
+# "No order above the labelled maximum daily dose (dose fraction at most 1)"
+ex:AnalgesiaDose a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANALGESIA_MAX_DOSE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "analgesia" ; ex:orders ?o . ?o ex:fraction_of_max_daily_dose ?f . FILTER (?f > 1) }""" ] .
+
+# "No neuraxial routes (epidural, intrathecal or spinal)"
+ex:AnalgesiaNeuraxial a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANALGESIA_NEURAXIAL" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "analgesia" ; ex:orders ?o . ?o ex:route ?r . FILTER (REGEX(?r, "epidural|intrathecal|spinal", "i")) }""" ] .
+
+# "Total opioid dose after the new orders must not exceed 90 MME per day (current plus new)"
+# Exception: "The opioid ceiling does not bind for a patient under a documented palliative care plan"
+ex:AnalgesiaCeiling a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANALGESIA_OPIOID_CEILING" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { { SELECT $this (SUM(?m) AS ?new) WHERE { $this ex:agent "analgesia" ; ex:orders ?o . ?o ex:mme_per_day ?m } GROUP BY $this }
+      OPTIONAL { $this ex:state_current_opioid_mme_per_day ?cur }
+      FILTER (COALESCE(?cur, 0) + ?new > 90)
+      FILTER NOT EXISTS { $this ex:palliative_care_plan true ; ex:palliative_plan_reference ?ref . FILTER (STRLEN(STR(?ref)) > 0) } }""" ] .
+
+# "Every analgesic recommendation must state the pain assessment it responds to"
+ex:AnalgesiaPain a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANALGESIA_PAIN_SCORE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "analgesia" ; ex:pain_assessment ?p . FILTER (STRLEN(STR(?p)) = 0) }""" ] .
+
+# "Formulary anticoagulants only: apixaban, rivaroxaban, edoxaban, dabigatran, enoxaparin and heparin"
+# Exception: "Warfarin is the anticoagulant for a mechanical heart valve"
+ex:AnticoagFormulary a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTICOAGULATION_FORMULARY" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "anticoagulation" ; ex:orders ?o . OPTIONAL { ?o ex:drug ?d } OPTIONAL { ?o ex:indication ?i }
+      FILTER (!BOUND(?d) || !REGEX(?d, "apixaban|rivaroxaban|edoxaban|dabigatran|enoxaparin|heparin", "i"))
+      FILTER (!(BOUND(?d) && REGEX(?d, "warfarin", "i") && BOUND(?i) && REGEX(?i, "mechanical", "i") && REGEX(?i, "valve", "i"))) }""" ] .
+
+# "No order above the labelled maximum daily dose"
+ex:AnticoagDose a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTICOAGULATION_MAX_DOSE" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "anticoagulation" ; ex:orders ?o . ?o ex:fraction_of_max_daily_dose ?f . FILTER (?f > 1) }""" ] .
+
+# "No more than 1 anticoagulant at a time"
+ex:AnticoagConcurrent a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTICOAGULATION_CONCURRENT" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "anticoagulation" ; ex:anticoagulant_count ?n . FILTER (?n > 1) }""" ] .
+
+# "Every anticoagulation recommendation must state a bleeding-risk assessment"
+ex:AnticoagBleeding a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_ANTICOAGULATION_BLEEDING_RISK" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "anticoagulation" ; ex:bleeding_risk_assessment ?b . FILTER (STRLEN(STR(?b)) = 0) }""" ] .
+
+# Coordinator: "At most 4 new medication orders per review"
+ex:CoordinatorOrders a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_COORDINATOR_MAX_NEW_ORDERS" ;
+  sh:sparql [ sh:prefixes ex: ; sh:select """
+    SELECT $this WHERE { $this ex:agent "review_coordinator" ; ex:new_order_count ?n . FILTER (?n > 4) }""" ] .

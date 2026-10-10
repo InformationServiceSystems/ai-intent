@@ -51,6 +51,12 @@ RULE_FIELDS: dict[str, str] = {
     "MANIFEST_WORKS_CPV_SCOPE": "lots", "MANIFEST_WORKS_LOT_VALUE": "lots", "MANIFEST_WORKS_SUBCONTRACTING": "lots",
     "MANIFEST_WORKS_NO_SINGLE_SOURCE": "lots", "MANIFEST_WORKS_PERFORMANCE_GUARANTEE": "lots",
     "MANIFEST_COORDINATOR_MAX_CONTRACT_TYPE": "allocation_by_contract_type",
+    "MANIFEST_ANTIMICROBIAL_SCOPE": "orders", "MANIFEST_ANTIMICROBIAL_RESTRICTED": "orders", "MANIFEST_ANTIMICROBIAL_DURATION": "orders",
+    "MANIFEST_ANTIMICROBIAL_INDICATION": "orders", "MANIFEST_ANALGESIA_MAX_DOSE": "orders", "MANIFEST_ANALGESIA_NEURAXIAL": "orders",
+    "MANIFEST_ANALGESIA_OPIOID_CEILING": "orders", "MANIFEST_ANALGESIA_PAIN_SCORE": "pain_assessment",
+    "MANIFEST_ANTICOAGULATION_FORMULARY": "orders", "MANIFEST_ANTICOAGULATION_MAX_DOSE": "orders",
+    "MANIFEST_ANTICOAGULATION_CONCURRENT": "anticoagulant_count", "MANIFEST_ANTICOAGULATION_BLEEDING_RISK": "bleeding_risk_assessment",
+    "MANIFEST_COORDINATOR_MAX_NEW_ORDERS": "new_order_count",
 }
 
 # The oracle's own ordinal rating scale (S&P/Fitch with Moody's equivalents), BBB+ = Baa1 = 15.
@@ -96,7 +102,9 @@ def _literal(key: str, value) -> Literal | None:
     if isinstance(value, bool):
         return Literal(value, datatype=XSD.boolean)
     if key in ("name", "instrument", "region", "procedure", "credit_rating", "esg_assessment", "sustainability_criterion",
-               "performance_guarantee", "inflation_rationale", "conflict_of_interest_screening"):
+               "performance_guarantee", "inflation_rationale", "conflict_of_interest_screening", "drug", "agent_type",
+               "indication", "route", "pain_assessment", "bleeding_risk_assessment", "id_approval_reference",
+               "palliative_plan_reference"):
         return Literal(str(value))
     num = oracle_number(value, fraction=key in FRACTION_FIELDS)
     if num is not None:
@@ -118,6 +126,9 @@ def render_response(g: Graph, node: URIRef, agent: str, payload: dict, state: di
         g.add((node, EX.flag, Literal(str(flag))))
     for key, value in payload.items():
         if key in ("analysis", "constraint_flags", "recommendation", "confidence", "out_of_scope", "proposed_allocation", "accountability_note", "model_accountability_note", "final_recommendation"):
+            continue
+        if isinstance(value, bool):
+            g.add((node, EX[key], Literal(value, datatype=XSD.boolean)))
             continue
         prop = EX[key]
         if isinstance(value, list):
@@ -281,7 +292,7 @@ def main() -> int:
     parser.add_argument("--regate", action="store_true", help="re-evaluate the logged payloads with the current gate instead of reading the logged verdicts")
     parser.add_argument("--json", default=str(ROOT / "oracle_agreement.json"))
     args = parser.parse_args()
-    result = agreement(args.prefix or ["c4_", "full_", "gen2_"], args.regate)
+    result = agreement(args.prefix or ["c4_", "c5_", "c6_", "full_", "gen2_", "gen_clinical"], args.regate)
     lines = [("Current gate re-evaluated on the logged payloads. " if args.regate else "Gate verdicts as logged. ") + f"{result['pairs']} (response, rule) pairs from {result['responses']} responses in {result['sessions']} sessions; "
              f"agreement {result['agree']} of {result['pairs']} ({result['agreement_pct']} %)", "",
              "| Rule | Agree | Gate passes, oracle fails | Gate fails, oracle passes |", "|---|---|---|---|"]

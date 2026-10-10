@@ -31,6 +31,10 @@ The evaluation's expected rule ids and the gate's predicates share one source, t
 
 **Text-predicate inconsistencies (fixed in the text):** the stocks leverage prohibition also forbade futures, options, swaps and CFDs, the materials one also margin, short, options, swaps and CFDs, and the emerging-market prohibition also frontier and developing markets, none of which the texts named. C2 did not check the forbidden values of set-exclusion predicates; it does now, and the texts name every forbidden value. The texts were widened to the predicates rather than the predicates narrowed to the texts; this is a decision for the author.
 
+## Third domain (10 October 2026)
+
+`evaluation/oracle/shapes_clinical.ttl` encodes the medication-review Mandates and their four exceptions from the texts and the exception descriptions; where the description is broader than the gate's condition list ("bone, joint and endovascular infections"), the shape follows the description. On 1154 clinical pairs the current gate agrees in all cases. Over all three domains: 8896 pairs from 1528 sessions, logged gate verdicts 99.24 %, current gate 100 %.
+
 ## What this means for the evaluation
 
 In the campaigns, 29 responses passed the gate although their typed content breached a rule as the Mandate text states it (24 unrated bond holdings, two hidden leveraged or over-cap positions, one oversized bucket, one leverage reference, one lot without CPV code). BVC was 100 % in every run because BVC measures whether a rejected message is delivered, not whether the gate's verdict is right. The oracle measures the second, and found the gate's verdict wrong in 0.4 % of the evaluated pairs, always through input normalisation (placeholders, rating notation, missing values), never through a wrong bound. A paper claim of "no non-compliant message delivered" therefore needs the qualifier "as judged by the gate", together with the oracle agreement as the evidence that the gate's judgement matches the Mandate texts.
