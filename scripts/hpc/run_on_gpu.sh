@@ -17,9 +17,11 @@ case "$NODE" in *.uni-saarland.de) ;; *) echo "unexpected node '$NODE'"; exit 1;
 echo "node $NODE"
 for i in $(seq 1 30); do ssh $LOGIN "curl -s --max-time 5 http://$NODE:11434/api/version" | grep -q version && break; sleep 10; done
 ssh -f -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 11435:$NODE:11434 $LOGIN || exit 1
-for m in $MODELS; do
-  curl -s --max-time 3000 http://localhost:11435/api/pull -d "{\"name\":\"$m\",\"stream\":false}" | grep -q success || { echo "pull $m failed"; exit 1; }
-done
+if [ "${PULL_PER_MODEL:-0}" != "1" ]; then
+  for m in $MODELS; do
+    curl -s --max-time 3000 http://localhost:11435/api/pull -d "{\"name\":\"$m\",\"stream\":false}" | grep -q success || { echo "pull $m failed"; exit 1; }
+  done
+fi
 caffeinate -i -s sh scripts/hpc/campaign.sh
 echo "campaign exit $?"
 ssh $LOGIN "condor_rm $JOB"
