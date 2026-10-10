@@ -64,7 +64,7 @@ The clinical domain (3.3) is the domain in which these constructs are needed rat
 
 ### 3.3 Further domains
 
-**Status:** research. Candidates must satisfy the transfer conditions stated in the paper: a sortal in-or-out-of-scope boundary, norms expressible as decidable prohibitions, session-stable Mandates, tolerance for lexicographic constraint priority. Clinical decision support fails the exception condition and is therefore a test of 1.3 rather than of the core; procurement and public tendering are closer candidates.
+**Status:** done 9 and 10 October 2026. Procurement (6.7) satisfies the original transfer conditions; medication review (`domains/clinical.py`, illustrative, not clinical guidance) is the domain that needs defeasible norms (1.3). Ten-run campaigns with two models (`paper2/clinical-notes.md`) found two conditions a specification with exceptions must meet: the exception must be part of the Mandate the agent sees (otherwise agents decline what the Mandate permits), and its condition must be expressible in the agent's response schema (otherwise it can never apply; design check D9). After both fixes, the approval, long-course and palliative exceptions applied in all runs of both models and the warfarin exception in 7 of 10 runs with the 70B model; BVC, CGP and the committee amendment were 100 % throughout.
 
 ## 4. Platform items
 
