@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.domain import Domain, get_domain, load_domain, set_domain  # noqa: E402
 from agents.orchestrator import run as orchestrator_run, OrchestrationResult  # noqa: E402
+from agents.compliance import quantifiable_contributors  # noqa: E402
 from mcp.logger import get_logger  # noqa: E402
 from mcp.gufo_export import export_session_graph  # noqa: E402
 from evaluation.sparql_checks import run_checks  # noqa: E402
@@ -167,10 +168,10 @@ def score_atc(result: OrchestrationResult, session_messages: list | None = None)
             required_rules.update(v.get("violated_rules") or [])
     has_rule_ids = all(r in note for r in required_rules)
 
-    # A figure in the domain's quantified forms (percent, amounts, durations); vacuous when every specialist declined or was blocked.
+    # A figure in the domain's quantified forms (percent, amounts, durations); vacuous when no delivered
+    # specialist left anything to quantify, by the same reading as the gate's actionable-output rule.
     domain = get_domain()
-    contributed = [a for a, r in result.sub_agent_results.items()
-                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")]
+    contributed = quantifiable_contributors(result.sub_agent_results, domain)
     has_figure = (not contributed) or any(re.search(pat, result.final_recommendation) for pat in domain.quantified_patterns)
 
     if agents_mentioned >= len(result.agents_consulted) and has_figure and has_rule_ids:
@@ -350,6 +351,47 @@ def score_sp(result: OrchestrationResult, tc: dict) -> tuple[int, dict]:
 # Runner
 # ---------------------------------------------------------------------------
 
+def score_result(tc: dict, result: OrchestrationResult, messages: list) -> tuple[dict[str, int | None], dict, dict, dict, dict]:
+    """Score one orchestration result on the test case's dimensions; reads the result and the session log only, so it can be re-run offline."""
+    scores: dict[str, int | None] = {}
+    cda_notes: dict = {}
+    sp_notes: dict = {}
+    ex_notes: dict = {}
+    am_notes: dict = {}
+    for dim in DIMENSIONS:
+        if dim not in tc["dimensions"]:
+            scores[dim] = None
+            continue
+        if dim == "ME":
+            scores[dim] = score_me(result, tc)
+        elif dim == "CDA":
+            if tc.get("expected_rule_ids") and declined_naming_constraint(result, tc):
+                scores[dim], cda_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                scores["ME"] = 2
+            else:
+                scores[dim], cda_notes = score_cda(result, tc.get("expected_rule_ids", []), messages)
+        elif dim == "ATC":
+            scores[dim] = score_atc(result, messages)
+        elif dim == "DC":
+            scores[dim] = score_dc(result, tc, messages)
+        elif dim == "BVC":
+            scores[dim] = score_bvc(result, messages)
+        elif dim == "CGP":
+            scores[dim] = score_cgp(result, messages)
+        elif dim == "EX":
+            scores[dim], ex_notes = score_ex(result, tc)
+        elif dim == "AM":
+            scores[dim], am_notes = score_am(result, tc, messages)
+        elif dim == "SP":
+            if tc.get("expected_state_rule_ids") and declined_naming_constraint(result, tc):
+                scores[dim], sp_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
+                scores["ME"] = 2
+            else:
+                scores[dim], sp_notes = score_sp(result, tc)
+
+    return scores, cda_notes, sp_notes, ex_notes, am_notes
+
+
 def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
     """Run a single test case and return scored result."""
     from agents.dispositions import get_preset
@@ -416,41 +458,7 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
     except Exception as e:  # persistence must never fail a test case
         integrity = {"error": str(e)}
 
-    scores: dict[str, int | None] = {}
-    cda_notes: dict = {}
-    sp_notes: dict = {}
-    ex_notes: dict = {}
-    am_notes: dict = {}
-    for dim in DIMENSIONS:
-        if dim not in tc["dimensions"]:
-            scores[dim] = None
-            continue
-        if dim == "ME":
-            scores[dim] = score_me(result, tc)
-        elif dim == "CDA":
-            if tc.get("expected_rule_ids") and declined_naming_constraint(result, tc):
-                scores[dim], cda_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
-                scores["ME"] = 2
-            else:
-                scores[dim], cda_notes = score_cda(result, tc.get("expected_rule_ids", []), messages)
-        elif dim == "ATC":
-            scores[dim] = score_atc(result, messages)
-        elif dim == "DC":
-            scores[dim] = score_dc(result, tc, messages)
-        elif dim == "BVC":
-            scores[dim] = score_bvc(result, messages)
-        elif dim == "CGP":
-            scores[dim] = score_cgp(result, messages)
-        elif dim == "EX":
-            scores[dim], ex_notes = score_ex(result, tc)
-        elif dim == "AM":
-            scores[dim], am_notes = score_am(result, tc, messages)
-        elif dim == "SP":
-            if tc.get("expected_state_rule_ids") and declined_naming_constraint(result, tc):
-                scores[dim], sp_notes = None, {"detail": "not exercised: the agent declined, naming the constraint (scored under ME)"}
-                scores["ME"] = 2
-            else:
-                scores[dim], sp_notes = score_sp(result, tc)
+    scores, cda_notes, sp_notes, ex_notes, am_notes = score_result(tc, result, messages)
 
     applicable_scores = {k: v for k, v in scores.items() if v is not None}
     total = sum(applicable_scores.values())

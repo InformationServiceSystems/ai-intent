@@ -93,6 +93,32 @@ def check_text_matches_bound(bc: BoundaryConstraint) -> list[Finding]:
     return []
 
 
+_STRICT_MIN = re.compile(r"\b(must exceed|exceeding|more than|above|greater than)\b", re.IGNORECASE)
+_INCLUSIVE_MIN = re.compile(r"\b(at least|minimum|or more|or better|not (?:be )?below|from|between)\b", re.IGNORECASE)
+_STRICT_MAX = re.compile(r"\b(remain below|stay below|below|less than|under|fewer than)\b", re.IGNORECASE)
+_INCLUSIVE_MAX = re.compile(r"\b(maximum|at most|more than|not exceed|must not exceed|exceeds?|longer than|above|beyond|not (?:be )?above|or less|between)\b", re.IGNORECASE)
+
+
+def check_text_matches_strictness(bc: BoundaryConstraint) -> list[Finding]:
+    """C5: a threshold text that excludes the bound ("must exceed", "remain below") needs a strict predicate, and an inclusive text ("maximum", "at least") a non-strict one."""
+    kind = bc.predicate.kind
+    if kind not in ("min_threshold", "max_threshold") or bc.predicate.value_scale == "credit_rating":
+        return []
+    strict_words, inclusive_words = (_STRICT_MIN, _INCLUSIVE_MIN) if kind == "min_threshold" else (_STRICT_MAX, _INCLUSIVE_MAX)
+    says_strict = bool(strict_words.search(bc.text)) and not inclusive_words.search(bc.text)
+    says_inclusive = bool(inclusive_words.search(bc.text)) and not strict_words.search(bc.text)
+    if says_strict and not bc.predicate.strict:
+        return [Finding(check="C5_STRICT", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                        detail=f"text excludes the bound ({strict_words.search(bc.text).group()!r}) but the predicate admits it")]
+    if says_inclusive and bc.predicate.strict:
+        return [Finding(check="C5_STRICT", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                        detail=f"text admits the bound ({inclusive_words.search(bc.text).group()!r}) but the predicate excludes it")]
+    if not says_strict and not says_inclusive:
+        return [Finding(check="C5_STRICT", rule_id=bc.rule_id, agent_id=bc.agent_id,
+                        detail="text does not say whether the bound itself is admitted")]
+    return []
+
+
 def _alternatives(pattern: str) -> list[str]:
     """Reduce a regex of alternatives to plain lowercase stems for matching against the text."""
     cleaned = re.sub(r"\\b", "", pattern)
@@ -160,11 +186,12 @@ def check_manifest_coverage(agent_id: str) -> list[Finding]:
 
 
 def run_all() -> list[Finding]:
-    """Run C1 to C4 over every agent and constraint."""
+    """Run C1 to C5 over every agent and constraint."""
     findings: list[Finding] = []
     for agent_id, constraints in _index().items():
         for bc in constraints:
             findings += check_text_matches_bound(bc)
+            findings += check_text_matches_strictness(bc)
             findings += check_text_names_terms(bc)
         findings += check_registry_matches_manifest(agent_id)
         findings += check_manifest_coverage(agent_id)
@@ -178,7 +205,7 @@ def main() -> int:
     print(f"{total} boundary constraints checked, {len(findings)} findings")
     for f in findings:
         print(f"  [{f.check}] {f.agent_id} {f.rule_id}: {f.detail}")
-    hard = [f for f in findings if f.check in ("C1_BOUND", "C2_TERMS")]
+    hard = [f for f in findings if f.check in ("C1_BOUND", "C2_TERMS", "C5_STRICT")]
     return 1 if hard else 0
 
 

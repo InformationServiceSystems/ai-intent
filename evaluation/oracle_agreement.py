@@ -292,7 +292,7 @@ def main() -> int:
     parser.add_argument("--regate", action="store_true", help="re-evaluate the logged payloads with the current gate instead of reading the logged verdicts")
     parser.add_argument("--json", default=str(ROOT / "oracle_agreement.json"))
     args = parser.parse_args()
-    result = agreement(args.prefix or ["c4_", "c5_", "c6_", "full_", "gen2_", "gen_clinical"], args.regate)
+    result = agreement(args.prefix or ["c4_", "c5_", "c6_", "full_", "gen2_", "gen_clinical", "fin_"], args.regate)
     lines = [("Current gate re-evaluated on the logged payloads. " if args.regate else "Gate verdicts as logged. ") + f"{result['pairs']} (response, rule) pairs from {result['responses']} responses in {result['sessions']} sessions; "
              f"agreement {result['agree']} of {result['pairs']} ({result['agreement_pct']} %)", "",
              "| Rule | Agree | Gate passes, oracle fails | Gate fails, oracle passes |", "|---|---|---|---|"]

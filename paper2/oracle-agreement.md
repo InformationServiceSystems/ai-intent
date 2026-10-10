@@ -38,3 +38,14 @@ The evaluation's expected rule ids and the gate's predicates share one source, t
 ## What this means for the evaluation
 
 In the campaigns, 29 responses passed the gate although their typed content breached a rule as the Mandate text states it (24 unrated bond holdings, two hidden leveraged or over-cap positions, one oversized bucket, one leverage reference, one lot without CPV code). BVC was 100 % in every run because BVC measures whether a rejected message is delivered, not whether the gate's verdict is right. The oracle measures the second, and found the gate's verdict wrong in 0.4 % of the evaluated pairs, always through input normalisation (placeholders, rating notation, missing values), never through a wrong bound. A paper claim of "no non-compliant message delivered" therefore needs the qualifier "as judged by the gate", together with the oracle agreement as the evidence that the gate's judgement matches the Mandate texts.
+
+## Final campaign (10 October 2026)
+
+`python evaluation/oracle_agreement.py --prefix fin_` on the nine campaigns of `paper2/final-campaign.md`: 8217 pairs from 2946 responses in 1347 sessions. Logged gate verdicts agree in 8205 (99.85 %). The twelve disagreements:
+
+- **Gate defect, fixed:** two responses with a market capitalisation of exactly $10 billion passed "must exceed $10 billion". The gate's `min` and `max` predicates admitted the bound; the oracle's shapes, written from the texts, exclude it where the text does ("must exceed", "remain below"). The specification now carries `strict`, the large-cap floor and the duration cap are strict, and C5 checks the wording of every threshold text (`spec-consistency.md`).
+- **Oracle defect, fixed:** the leverage shapes matched "leveraged" but not "leverage", and a whole-string exclusion for "unleveraged" masked the rest of the value. "Physical or unleveraged ETF, potentially with leverage" (a reckless-preset session) therefore passed the oracle while the gate rejected it. The shapes now match the stem and exclude only values that begin with a negation.
+- **Oracle limitation, stated:** ten pairs in the committee-amendment case (CL-11). The gate evaluated a 21-day course against the cap the committee had raised to 21 days for the session; the oracle encodes the registered 14-day cap and does not read `governance.amend`. With `--regate`, which re-evaluates the payloads under the registered Mandates, the two agree.
+
+After the two fixes the current gate agrees with the oracle on all 8217 pairs of the final campaign and on all 17 113 pairs from 2875 sessions of every archived campaign with typed outputs (logged verdicts: 99.53 %).
+

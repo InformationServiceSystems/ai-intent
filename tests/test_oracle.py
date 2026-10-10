@@ -35,6 +35,11 @@ def _graph():
     render_response(g, EX["r/c"], "bonds", {"holdings": [{"name": "X", "credit_rating": "BBB+/Baa1", "maturity_years": 2, "allocation": 0.3},
                                                          {"name": "Y", "credit_rating": "N/A", "maturity_years": 5, "allocation": 0.2}],
                                              "portfolio_duration_years": 10}, None)
+    render_response(g, EX["r/d"], "materials", {"commodities": [{"name": "Gold", "allocation": 0.1, "instrument": "physical or unleveraged ETF, potentially with leverage"}],
+                                                 "inflation_rationale": "tracks CPI"}, None)
+    render_response(g, EX["r/e"], "materials", {"commodities": [{"name": "Gold", "allocation": 0.1, "instrument": "physical or unleveraged ETF"}],
+                                                 "inflation_rationale": "tracks CPI"}, None)
+    render_response(g, EX["r/f"], "stocks", {"positions": [{"name": "Company A", "market_cap_usd": 10_000_000_000, "allocation": 0.05, "instrument": "spot equity"}]}, None)
     return g
 
 
@@ -50,6 +55,25 @@ def test_fast_path_equals_shacl_engine():
                                           "MANIFEST_MATERIALS_INFLATION")} <= fast
     assert (str(EX["r/c"]), "MANIFEST_BONDS_IG_ONLY") in fast                   # N/A is not investment grade
     assert (str(EX["r/c"]), "MANIFEST_BONDS_MAX_DURATION") in fast              # "remain below 10 years"
+    assert (str(EX["r/d"]), "MANIFEST_MATERIALS_NO_LEVERAGE") in fast           # "with leverage" after an "unleveraged" alternative
+    assert (str(EX["r/e"]), "MANIFEST_MATERIALS_NO_LEVERAGE") not in fast       # "unleveraged" alone is not leverage
+    assert (str(EX["r/f"]), "MANIFEST_STOCKS_LARGECAP") in fast                 # "must exceed $10 billion": exactly 10 billion violates
+
+
+def test_bounds_are_strict_where_the_text_excludes_them():
+    """The gate reads "must exceed" and "remain below" as excluding the bound, like the oracle; "maximum" admits it."""
+    d = load_domain("finance")
+    cap = next(b for b in d.boundary_constraints("stocks") if b.rule_id == "MANIFEST_STOCKS_LARGECAP")
+    at = _evaluate_boundary_constraint(cap, {"analysis": "x", "positions": [{"name": "A", "market_cap_usd": 10_000_000_000}]}, d.manifest("stocks"))
+    above = _evaluate_boundary_constraint(cap, {"analysis": "x", "positions": [{"name": "A", "market_cap_usd": 10_000_000_001}]}, d.manifest("stocks"))
+    assert at.passed is False and above.passed is True
+    dur = next(b for b in d.boundary_constraints("bonds") if b.rule_id == "MANIFEST_BONDS_MAX_DURATION")
+    at = _evaluate_boundary_constraint(dur, {"analysis": "x", "portfolio_duration_years": 10}, d.manifest("bonds"))
+    below = _evaluate_boundary_constraint(dur, {"analysis": "x", "portfolio_duration_years": 9.9}, d.manifest("bonds"))
+    assert at.passed is False and below.passed is True
+    pos = next(b for b in d.boundary_constraints("stocks") if b.rule_id == "MANIFEST_STOCKS_MAX_POSITION")
+    at = _evaluate_boundary_constraint(pos, {"analysis": "x", "positions": [{"name": "A", "allocation": 0.10}]}, d.manifest("stocks"))
+    assert at.passed is True
 
 
 def test_oracle_readings():

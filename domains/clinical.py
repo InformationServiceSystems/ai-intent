@@ -494,5 +494,5 @@ DOMAIN = Domain(
     test_cases=TEST_CASES,
     default_state=DEFAULT_STATE,
     exceptions=EXCEPTIONS,
-    quantified_patterns=[r"\d+(?:\.\d+)?\s*%", r"\d+\s*(?:mg|g|mcg|units?|iu)\b", r"\d+\s*(?:day|days|week|weeks)\b", r"\d+\s*mme", r"\d+(?:\.\d+)?\s*(?:mg/kg)"],
+    quantified_patterns=[r"\d+(?:\.\d+)?\s*%", r"\d+\s*(?:mg|g|mcg|units?|iu)\b", r"\d+\s*(?:day|days|week|weeks)\b", r"\d+\s*(?:MME|mme)", r"\d+(?:\.\d+)?\s*(?:mg/kg)"],
 )

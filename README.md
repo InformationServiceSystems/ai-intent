@@ -142,10 +142,13 @@ ai-intent/
 │
 ├── evaluation/
 │   ├── runner.py               # Evaluation suite of the active domain (--domain, --cases, --dry-run), 7 dimensions
-│   ├── spec_consistency.py     # C1 to C4 over the active domain's constraints
-│   ├── design_checks.py        # D1 to D8: design-time checks over the OWL rendering of the Mandates
+│   ├── spec_consistency.py     # C1 to C5 over the active domain's constraints
+│   ├── design_checks.py        # D1 to D9: design-time checks over the OWL rendering of the Mandates
 │   ├── oracle_agreement.py     # Independent SHACL encoding of the Mandates compared with the gate
-│   ├── campaign_summary.py     # Aggregate parallel campaigns
+│   ├── run_parallel.py         # N independent workers of the suite against one model endpoint
+│   ├── session_health.py       # Sessions with model or connection errors, to exclude or re-run before scoring
+│   ├── rescore.py              # Re-score persisted sessions with the current scorers, without a model
+│   ├── campaign_summary.py     # Aggregate parallel campaigns (reports infrastructure errors per campaign)
 │   ├── sparql_checks.py        # Trace invariants as SPARQL queries
 │   ├── spot_check.py           # Quick single-case checks
 │   └── paper_analysis.py       # Aggregate analysis for the paper
@@ -196,6 +199,14 @@ python -m pytest tests -q                         # deterministic tests: gate, s
 python evaluation/design_checks.py --all          # design-time checks D1 to D8 on every domain
 python evaluation/oracle_agreement.py --regate    # gate versus the independent SHACL encoding on the archived sessions
 AI_INTENT_DOMAIN=procurement python evaluation/spec_consistency.py
+```
+
+A campaign is checked before it is scored and can be re-scored without a model:
+
+```bash
+python evaluation/session_health.py fin_m8_procurement    # sessions whose log records a model or connection error
+python evaluation/rescore.py fin_m8_clinical              # recompute every score from the persisted sessions
+python evaluation/campaign_summary.py fin_m8_finance fin_m70_finance --markdown evaluation/fin_summary.md
 ```
 
 ### Quick smoke test
@@ -260,7 +271,7 @@ A second paper, planned under [paper2/PLAN.md](paper2/PLAN.md), uses three parts
 - **Schema-enforced responses.** Every LLM call passes a JSON schema (`agents/schemas.py`, Pydantic models) as `response_format`; Ollama enforces it by constrained decoding, so the typed fields are always present and correctly named. Servers that reject the parameter fall back to free-form JSON. Prompt examples use recognisable placeholders, and a copied placeholder item is ignored by the gate.
 - **Structured outputs for every constraint.** Equities return `positions` (market cap, instrument, ESG assessment), bonds `holdings` (rating, maturity, allocation, region) and `portfolio_duration_years`, materials `commodities` (instrument) and `inflation_rationale`, the synthesis `allocation_by_asset_class`. Every boundary constraint is evaluated on these fields first (threshold, set, required-field kinds); regular expressions and synonym lists remain only as prose fallback.
 - **Constraints as a single source.** Every boundary constraint is one `ConstraintSpec` in `agents/constraint_spec.py`; the manifest text, the predicate and the registry entry are generated from it, and every number is read from the agent's risk parameters. Text and predicate cannot diverge.
-- **Specification-predicate consistency.** `python evaluation/spec_consistency.py` checks for every boundary constraint that the text states the number the predicate enforces (C1), that term predicates are named in the text (C2), that the gate cites the manifest's wording (C3), and that numeric or prohibitive manifest constraints have a predicate (C4). A test pins the two known term proxies and the two constraints without predicate; see `paper2/spec-consistency.md`.
+- **Specification-predicate consistency.** `python evaluation/spec_consistency.py` checks for every boundary constraint that the text states the number the predicate enforces (C1), that term predicates are named in the text (C2), that the gate cites the manifest's wording (C3), that numeric or prohibitive manifest constraints have a predicate (C4), and that a threshold text which excludes the bound ("must exceed", "remain below") has a strict predicate while an inclusive text ("maximum", "at least") has a non-strict one (C5). A test pins the two known term proxies and the two constraints without predicate; see `paper2/spec-consistency.md`.
 - **Accountability tab.** The result view has a tab that shows, for the active session and from the log alone, the delegation chain with its containment checks, every commitment breach with the parties answerable for it, the disposition manifestations, and the trace invariants Q1 to Q8 (Q9 on demand), with a download of the session graph as Turtle.
 - **OntoUML model.** `ontology/ontouml/` holds the conceptual model as an OntoUML project built with `ontouml-js` (26 classes, 33 relations), schema-validated, verified without issues and transformed to gUFO; `evaluation/ontouml_alignment.py` checks that the model's gUFO typing agrees with the export's.
 - **Reasoner check against gUFO (Q9).** `evaluation/gufo_consistency.py` merges a session graph with the gUFO ontology (`evaluation/ontology/gufo.ttl`, CC BY 4.0), closes it under OWL RL with `owlrl`, and reports every individual placed in two disjoint UFO categories. The runner applies it to every session; `sparql_checks.py --gufo` adds it on demand.

@@ -55,6 +55,8 @@ def summarise(prefix: str) -> dict:
     out["cda_conditional"] = {"mean": round(statistics.mean(cc), 1) if cc else None,
                               "std": round(statistics.stdev(cc), 1) if len(cc) > 1 else 0.0,
                               "cases": sum((r.get("cda_conditional") or {}).get("cases", 0) for r in runs)}
+    from evaluation.session_health import scan
+    out["infrastructure_errors"] = scan(prefix + "_p")["with_infrastructure_errors"]
     out["mean_duration_s"] = round(statistics.mean(c.get("duration_s", 0) for c in cases), 1) if cases else 0
     return out
 
@@ -68,11 +70,11 @@ def markdown(summaries: list[dict]) -> str:
         cc = s["cda_conditional"]
         cells.append(f"{cc['mean']} ± {cc['std']}" if cc["mean"] is not None else "—")
         lines.append(f"| {s['prefix']} | {s['model']} | {s['domain']} | {s['runs']} | " + " | ".join(cells) + " |")
-    lines += ["", "| Campaign | Sessions | Cases passed | Integrity ok | Forced blocks | Exceptions | CDA exposure | Mean s/case |",
-              "|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| Campaign | Sessions | Infrastructure errors | Cases passed | Integrity ok | Forced blocks | Exceptions | CDA exposure | Mean s/case |",
+              "|---|---|---|---|---|---|---|---|---|"]
     for s in summaries:
         e = s["exposure"]
-        lines.append(f"| {s['prefix']} | {s['sessions']} | {s['cases_passed']} | {s['integrity_ok']} | {s['forced_blocks']} | "
+        lines.append(f"| {s['prefix']} | {s['sessions']} | {s['infrastructure_errors']} | {s['cases_passed']} | {s['integrity_ok']} | {s['forced_blocks']} | "
                      f"{s['exceptions']} | {e['proposed']} of {e['expected']} ({e['pct']} %), {e['caught_first']} on attempt 1 | {s['mean_duration_s']} |")
     return "\n".join(lines)
 

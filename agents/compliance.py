@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from agents.constraint_spec import BoundaryConstraint, Predicate
 from agents.dispositions import DEFAULT_MANIFESTATION_THRESHOLD as DISPOSITION_THRESHOLD
-from agents.domain import SessionState, get_domain
+from agents.domain import Domain, SessionState, get_domain
 from agents.manifests import AgentManifest, DispositionProfile, manifest_to_system_prompt
 from mcp.logger import MCPMessage, build_message, get_logger
 from utils.llm import chat, safe_parse_json
@@ -460,13 +460,13 @@ def _evaluate_plain(
         bound = manifest.risk_parameters[p.risk_param_key]
         values = _structured_values(payload, p, manifest) if p.structured_field else None
         if values is not None:
-            over = [(k, v) for k, v in values if v > bound + _EPS]
+            over = [(k, v) for k, v in values if (v >= bound - _EPS if p.strict else v > bound + _EPS)]
             shown = [f"{k}: {v*100:.1f}%" if p.extract == "percent" else f"{k}: {v:g}" for k, v in over]
             detail = f"{p.exceed_label} exceeding limit (structured): {shown}" if over else "All within limit (structured)"
             phi_satisfied = len(over) > 0
         elif p.extract == "duration_years":
             matches = re.findall(r"(\d+(?:\.\d+)?)\s*(?:year|yr)", text, re.IGNORECASE)
-            over_d = [float(d) for d in matches if float(d) > bound]
+            over_d = [float(d) for d in matches if (float(d) >= bound if p.strict else float(d) > bound)]
             detail = f"{p.exceed_label} exceeding limit: {over_d}" if over_d else "All within limit"
             phi_satisfied = len(over_d) > 0
         elif p.extract == "amount":
@@ -518,11 +518,11 @@ def _evaluate_plain(
         values = _structured_values(payload, p, manifest)
         raw_bound = manifest.risk_parameters[p.risk_param_key]
         bound = _rating_rank(raw_bound) if p.value_scale == "credit_rating" else float(raw_bound)
-        below = [k for k, v in values if bound is not None and v < bound]
+        below = [k for k, v in values if bound is not None and (v <= bound if p.strict else v < bound)]
         if p.value_scale == "credit_rating":
             detail = f"{p.exceed_label} ({raw_bound}): {below}" if below else f"All structured holdings rated {raw_bound} or better"
         elif p.extract == "percent":
-            shown = [f"{k} ({v*100:.1f}%)" for k, v in values if v < bound]
+            shown = [f"{k} ({v*100:.1f}%)" for k, v in values if (v <= bound if p.strict else v < bound)]
             detail = f"{p.exceed_label}: {shown}" if below else f"All structured values at or above {bound*100:g}%"
         elif bound >= 1e9:
             shown = [f"{k} (${v / 1e9:.1f}B)" for k, v in values if v < bound]
@@ -941,6 +941,20 @@ def _check_decision_right(
 # Deterministic checks — synthesis
 # ---------------------------------------------------------------------------
 
+
+def quantifiable_contributors(sub_agent_results: dict[str, Any], domain: Domain) -> list[str]:
+    """Specialists whose delivered result leaves something to quantify in the synthesis.
+
+    A specialist contributes if it was delivered (not out of scope, blocked or in error) and either
+    recommends acting or returned typed items; a delivered "hold" without orders leaves nothing to
+    quantify (clinical campaign, CL-08). The gate's actionable-output rule and the ATC scorer share this reading.
+    """
+    def _has_items(r: dict) -> bool:
+        return any(isinstance(v, list) and any(isinstance(i, dict) for i in v) for k, v in r.items() if k != "proposed_allocation")
+    return [a for a, r in sub_agent_results.items()
+            if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")
+            and (r.get("recommendation") == domain.active_recommendation or _has_items(r))]
+
 def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any]) -> list[RuleResult]:
     """Deterministic checks on the orchestrator's synthesis output."""
     domain = get_domain()
@@ -985,13 +999,7 @@ def _check_synthesis(payload: dict[str, Any], sub_agent_results: dict[str, Any])
     has_number = any(re.search(pat, recommendation) for pat in domain.quantified_patterns)
     # Nothing to quantify when every consulted specialist declined or was blocked: the synthesis
     # then reports the declines, and the obligation is vacuous (logged as such, not silently passed).
-    # A specialist contributes something to quantify if it was delivered and either recommends acting or
-    # returned typed items; a delivered "hold" without orders leaves nothing to quantify (clinical campaign, CL-08).
-    def _has_items(r: dict) -> bool:
-        return any(isinstance(v, list) and any(isinstance(i, dict) for i in v) for k, v in r.items() if k != "proposed_allocation")
-    contributed = [a for a, r in sub_agent_results.items()
-                   if isinstance(r, dict) and not r.get("out_of_scope") and not r.get("blocked") and not r.get("error")
-                   and (r.get("recommendation") == domain.active_recommendation or _has_items(r))]
+    contributed = quantifiable_contributors(sub_agent_results, domain)
     vacuous = bool(sub_agent_results) and not contributed
     results.append(RuleResult(
         rule="Final recommendation must contain specific quantified guidance",

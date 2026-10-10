@@ -15,7 +15,7 @@ ex:StocksMaxPosition a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MA
 ex:StocksNoLeverage a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_NO_LEVERAGE" ;
   sh:sparql [ sh:prefixes ex: ; sh:select """
     SELECT $this WHERE { $this ex:agent "stocks" ; ex:positions ?p . ?p ex:instrument ?i .
-      FILTER ((REGEX(?i, "(^|[^a-z-])(margin|short|leveraged|futures|options?|swaps?|cfds?|derivatives?)", "i")) && !REGEX(?i, "(un|non-?)leveraged|no margin|not leveraged|no derivatives", "i")) }""" ] .
+      FILTER ((REGEX(?i, "(^|[^a-z-])(margin|short|leverag|futures|options?|swaps?|cfds?|derivatives?)", "i")) && !REGEX(?i, "^(no margin|not leveraged|no leverage|no derivatives)", "i")) }""" ] .
 
 # "ESG screening required: must flag ESG concerns for any new position"
 ex:StocksEsg a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_STOCKS_ESG" ;
@@ -77,7 +77,7 @@ ex:MaterialsApproved a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MA
 ex:MaterialsNoLeverage a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_NO_LEVERAGE" ;
   sh:sparql [ sh:prefixes ex: ; sh:select """
     SELECT $this WHERE { $this ex:agent "materials" ; ex:commodities ?c . ?c ex:instrument ?i .
-      FILTER ((REGEX(?i, "(^|[^a-z-])(leveraged|margin|short)", "i") && !REGEX(?i, "(un|non-?)leveraged|not leveraged|no margin", "i")) || REGEX(?i, "futures|(^|[^a-z])(options?|swaps?|cfds?|derivatives?)([^a-z]|$)", "i")) }""" ] .
+      FILTER ((REGEX(?i, "(^|[^a-z-])(leverag|margin|short)", "i") && !REGEX(?i, "^(not leveraged|no leverage|no margin)", "i")) || REGEX(?i, "futures|(^|[^a-z])(options?|swaps?|cfds?|derivatives?)([^a-z]|$)", "i")) }""" ] .
 
 # "Rebalancing trigger: flag to orchestrator (rebalance_flag) if the proposed allocation drifts more than ±5% from the target"
 ex:MaterialsRebalance a sh:NodeShape ; sh:targetClass ex:Response ; ex:ruleId "MANIFEST_MATERIALS_REBALANCE" ;

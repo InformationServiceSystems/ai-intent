@@ -109,6 +109,7 @@ class Predicate(BaseModel):
     risk_param_key: str | None = None      # key into manifest.risk_parameters -> the bound
     extract: Literal["percent", "duration_years", "amount", "number"] | None = None
     exceed_label: str | None = None        # detail prefix, e.g. "Positions", "Durations"
+    strict: bool = False                   # the bound itself violates ("must exceed", "remain below")
 
     # forbidden_term
     term_pattern: str | None = None        # regex source
@@ -192,6 +193,7 @@ class ConstraintSpec(BaseModel):
     risk_param_key: str | None = None
     unit: Literal["percent", "years", "amount", "number"] | None = None
     exceed_label: str | None = None
+    strict: bool = False    # the bound itself violates: "must exceed X" (min) or "remain below X" (max); default inclusive ("maximum X", "at least X")
 
     # forbid
     terms: list[str] | None = None          # plain terms named in the text
@@ -301,7 +303,7 @@ def to_predicate(spec: ConstraintSpec) -> Predicate:
         value_scale=spec.value_scale, min_items=spec.min_items,
         state_key=spec.state_key, flag_field=spec.flag_field, flag_terms=spec.flag_terms,
         condition_param=spec.condition_param, condition_value=spec.condition_value,
-        risk_param_key=spec.risk_param_key, extract=extract, exceed_label=spec.exceed_label,
+        risk_param_key=spec.risk_param_key, extract=extract, exceed_label=spec.exceed_label, strict=spec.strict,
         term_pattern=spec.term_pattern, on_lower=spec.on_lower, ignorecase=spec.ignorecase,
         negation_aware=spec.negation_aware,
         found_template=spec.found_template, clean_template=spec.clean_template,
@@ -354,7 +356,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         rule_id="MANIFEST_STOCKS_LARGECAP", agent_id="stocks", variable="market_cap_usd",
         kind="min", deontic_type="F", regulatory_basis="AgentManifest.stocks", tags=["scope"],
         template="Large-cap equities only: market capitalization must exceed ${max_market_cap_threshold_billions} billion; {terms} equities are outside the universe",
-        structured_field="positions", item_key="market_cap_usd", risk_param_key="max_market_cap_threshold",
+        structured_field="positions", item_key="market_cap_usd", risk_param_key="max_market_cap_threshold", strict=True,
         field_description="market capitalisation in US dollars as a number",
         exceed_label="Positions below the market-cap floor",
         terms=["mid-cap", "small-cap", "micro-cap", "penny stock", "OTC"],
@@ -386,7 +388,7 @@ CONSTRAINT_SPECS: list[ConstraintSpec] = [
         kind="max", deontic_type="F", regulatory_basis="AgentManifest.bonds", tags=["exposure_cap"],
         template="Portfolio duration must remain below {value} years",
         structured_field="portfolio_duration_years", field_description="the resulting portfolio duration in years",
-        risk_param_key="max_duration_years", unit="years", exceed_label="Durations",
+        risk_param_key="max_duration_years", unit="years", exceed_label="Durations", strict=True,
     ),
     ConstraintSpec(
         rule_id="MANIFEST_BONDS_LADDER", agent_id="bonds", variable="single_maturity_bucket",
