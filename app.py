@@ -24,6 +24,7 @@ from ui.manifest_diff import render_manifest_diff
 from ui.mcp_stream import render_mcp_stream
 from ui.revision_history import render_revision_history
 from ui.accountability_panel import render_accountability_panel
+from ui.governance_panel import render_governance_inputs, render_governance_tab, reset_governance_inputs, session_inputs
 
 st.set_page_config(
     layout="wide",
@@ -368,8 +369,13 @@ with st.sidebar:
         set_domain(load_domain(_chosen))
         for key in ("last_result", "current_session_id", "view_session_id", "selected_agent", "custom_dispositions"):
             st.session_state.pop(key, None)
+        reset_governance_inputs()
         st.rerun()
     st.caption(_get_domain().description)
+
+    st.divider()
+    render_governance_inputs(st.session_state.get("principal_id", "anonymous"))
+    st.divider()
 
     from agents.dispositions import get_preset, get_preset_names
 
@@ -504,7 +510,15 @@ with col2:
             active_preset = st.session_state.get("active_preset", {})
             preset_name = st.session_state.get("active_preset_name", "neutral")
 
+            _run_state, _run_amendments = session_inputs()
+            # The session belongs to the domain's Principal unless the user entered another id.
+            _entered = st.session_state.get("principal_id", "anonymous")
+            from agents.domain import get_domain as _gd
+            _run_principal = _gd().principal.principal_id if _entered in ("demo_user@local", "anonymous") else _entered
+
             with st.status("Running orchestration pipeline...", expanded=True) as status:
+                if _run_amendments:
+                    st.write(f"Governance: {len(_run_amendments)} amendment(s) submitted to the gate")
                 if active_dispositions:
                     st.write(f"Preset: {preset_name} | Agents: {list(active_dispositions.keys())}")
                 st.write("Phase 1: Logging user query...")
@@ -515,7 +529,9 @@ with col2:
                     preset_name=preset_name,
                     system_prompt_modifier=active_preset.get("system_prompt_modifier", ""),
                     compliance_multiplier=active_preset.get("compliance_multiplier", 1.0),
-                    principal_id=st.session_state.get("principal_id", "anonymous"),
+                    principal_id=_run_principal,
+                    state=_run_state,
+                    amendments=_run_amendments,
                 ))
                 st.write(f"Phase 3: Delegated to: {', '.join(result.agents_consulted)} (with CP2 compliance)")
                 st.write("Phase 4: Synthesizing with compliance check (CP3)...")
@@ -540,8 +556,8 @@ with col2:
     # Display results in tabs
     if result:
         st.divider()
-        results_tab, flow_tab, compliance_tab, compliance_log_tab, violations_tab, accountability_tab = st.tabs(
-            ["Results", "Intent Flow", "Compliance", "Compliance Log", "Violations", "Accountability"]
+        results_tab, flow_tab, compliance_tab, compliance_log_tab, violations_tab, accountability_tab, governance_tab = st.tabs(
+            ["Results", "Intent Flow", "Compliance", "Compliance Log", "Violations", "Accountability", "Governance"]
         )
 
         with results_tab:
@@ -658,6 +674,9 @@ with col2:
 
         with accountability_tab:
             render_accountability_panel(active_session)
+
+        with governance_tab:
+            render_governance_tab(result)
 
 with col3:
     st.subheader("MCP Stream & Constraints")

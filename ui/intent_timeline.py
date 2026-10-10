@@ -308,13 +308,17 @@ def _render_routing_phase(route_msg: MCPMessage, agent_ids: list[str]) -> None:
     # Orchestrator constraint overlay
     st.markdown("**Orchestrator Constraints (Routing Phase):**")
     num_selected = len(agent_ids)
-    constraints_status = [
-        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[0], f"Satisfied ({num_selected} agents selected)" if num_selected >= 1 else "VIOLATED"),
-        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[1], "Will be checked at synthesis"),
-        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[2], "Satisfied (all calls logged via MCP)"),
-        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[3], "Will be checked at synthesis"),
-        (get_domain().manifest(get_domain().orchestrator_id).boundary_constraints[4], "Will be checked at synthesis"),
-    ]
+    def _routing_status(text: str) -> str:
+        """Routing-phase status of one orchestrator constraint, by its content rather than its position."""
+        low = text.lower()
+        if "consult" in low:
+            return f"Satisfied ({num_selected} agents selected)" if num_selected >= 1 else "VIOLATED"
+        if "logged" in low:
+            return "Satisfied (all calls logged via MCP)"
+        return "Will be checked at synthesis"
+
+    orchestrator = get_domain().manifest(get_domain().orchestrator_id)
+    constraints_status = [(c, _routing_status(c)) for c in orchestrator.boundary_constraints]
     for constraint, status in constraints_status:
         if "Satisfied" in status:
             st.markdown(f"- :green[{constraint}] — *{status}*")
