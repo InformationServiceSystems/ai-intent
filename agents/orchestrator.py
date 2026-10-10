@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from agents.accountability import build_accountability_note, compliance_history
-from agents.compliance import ComplianceVerdict, get_compliance_agent
+from agents.compliance import ComplianceVerdict, gate_mode, get_compliance_agent
 from agents.delegation import accountability_record, build_delegation_chain, check_chain_containment
 from agents.dispositions import detect_manifestations
 from agents.domain import SessionState, get_domain
@@ -378,6 +378,17 @@ def _state_context(agent_id: str, state: SessionState) -> str:
     return "\n\n[SESSION STATE — your proposal is checked against it]\n" + "\n".join(lines)
 
 
+def _log_observed(session_id: str, checkpoint: str, verdict: ComplianceVerdict) -> None:
+    """Prompt-only ablation: record that a rejected routing or synthesis was delivered without revision."""
+    domain = get_domain()
+    get_logger().log(build_message(
+        session_id, "internal", domain.compliance_id, domain.orchestrator_id, f"compliance.observe.{checkpoint}",
+        {"gate_mode": "observe", "delivered": True, "approved": False,
+         "violated_rules": verdict.violated_rules, "message_id": verdict.message_id},
+        "constraint_violation",
+    ))
+
+
 async def _route_with_compliance(
     system_prompt: str, query: str, session_id: str,
     compliance: Any, all_verdicts: list[ComplianceVerdict],
@@ -401,7 +412,9 @@ async def _route_with_compliance(
         logger.log(build_message(session_id, "internal", oid, oid, "intent.route", routing))
         verdict = await compliance.evaluate_routing(routing, session_id)
         all_verdicts.append(verdict)
-        if not verdict.approved:
+        if not verdict.approved and gate_mode() == "observe":
+            _log_observed(session_id, "routing", verdict)
+        elif not verdict.approved:
             verdict.overall_status = "forced_block"
             logger.log(build_message(
                 session_id, "internal", cid, oid, "compliance.block.routing",
@@ -426,6 +439,9 @@ async def _route_with_compliance(
         all_verdicts.append(verdict)
 
         if verdict.approved:
+            return routing
+        if gate_mode() == "observe":
+            _log_observed(session_id, "routing", verdict)
             return routing
 
         if attempt == max_retries:
@@ -516,6 +532,9 @@ async def _synthesize_with_compliance(
         all_verdicts.append(verdict)
 
         if verdict.approved:
+            return synthesis
+        if gate_mode() == "observe":
+            _log_observed(session_id, "synthesis", verdict)
             return synthesis
 
         if attempt == max_retries:

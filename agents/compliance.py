@@ -11,6 +11,7 @@ predicates against the session state the orchestrator passes in, and records the
 snapshot it used in every verdict.
 """
 
+import os
 import re
 from typing import Any, Callable, Literal
 from uuid import uuid4
@@ -1153,6 +1154,14 @@ def _fuzzy_rule_match(constraint: str, rule: str) -> bool:
 # ComplianceAgent — the gatekeeper
 # ---------------------------------------------------------------------------
 
+def gate_mode() -> str:
+    """The gate's mode: "enforce" (default) revises and blocks; "observe" evaluates and logs but delivers everything (prompt-only ablation)."""
+    mode = os.getenv("AI_INTENT_GATE_MODE", "enforce").strip().lower()
+    if mode not in ("enforce", "observe"):
+        raise ValueError(f"AI_INTENT_GATE_MODE must be 'enforce' or 'observe', not {mode!r}")
+    return mode
+
+
 class ComplianceAgent:
     """Mandatory intermediary on the MCP bus. Every inter-agent message must pass through evaluate() before delivery."""
 
@@ -1382,6 +1391,14 @@ class ComplianceAgent:
             result = await agent_func(query, session_id, disposition=None)
 
         verdict = await self.evaluate_analysis(agent_id, result, session_id, disposition=disposition, state=state)
+
+        if gate_mode() == "observe":
+            # Prompt-only ablation: the verdict is logged as usual, but the first response is delivered as it is.
+            self._log(session_id, f"compliance.observe.{agent_id}", {
+                "gate_mode": "observe", "delivered": True, "approved": verdict.approved,
+                "violated_rules": verdict.violated_rules, "message_id": verdict.message_id, "policy_id": policy_id,
+            }, "approved" if verdict.approved else "constraint_violation")
+            return result, verdict
 
         revision_count = 0
         while not verdict.approved and revision_count < self._max_revisions:

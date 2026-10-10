@@ -144,6 +144,7 @@ ai-intent/
 │   ├── runner.py               # Evaluation suite of the active domain (--domain, --cases, --dry-run), 7 dimensions
 │   ├── spec_consistency.py     # C1 to C6 over the active domain's constraints and instructions
 │   ├── design_checks.py        # D1 to D9: design-time checks over the OWL rendering of the Mandates
+│   ├── ablation.py             # Prompt-only ablation: violating messages delivered with and without the gate
 │   ├── oracle_agreement.py     # Independent SHACL encoding of the Mandates compared with the gate
 │   ├── run_parallel.py         # N independent workers of the suite against one model endpoint
 │   ├── session_health.py       # Sessions with model or connection errors, to exclude or re-run before scoring
@@ -205,6 +206,8 @@ A campaign is checked before it is scored and can be re-scored without a model:
 
 ```bash
 python evaluation/session_health.py fin_m8_procurement    # sessions whose log records a model or connection error
+GATE_MODE=observe PREFIX=abl sh scripts/hpc/campaign.sh    # prompt-only arm: the gate logs verdicts but never revises or blocks
+python evaluation/ablation.py --enforce fin_ --observe abl_    # violating messages reaching the principal, gate versus prompt-only
 python evaluation/rescore.py fin_m8_clinical              # recompute every score from the persisted sessions
 python evaluation/campaign_summary.py fin_m8_finance fin_m70_finance --markdown evaluation/fin_summary.md
 ```

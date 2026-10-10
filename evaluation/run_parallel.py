@@ -51,7 +51,7 @@ def main() -> int:
     if error:
         print(f"preflight failed for {model} at {args.base_url}: {error}")
         return 3
-    print(f"preflight ok: {model} at {args.base_url}")
+    print(f"preflight ok: {model} at {args.base_url} (gate mode: {os.getenv('AI_INTENT_GATE_MODE', 'enforce')})")
 
     logs = ROOT / "evaluation" / "logs"
     logs.mkdir(exist_ok=True)

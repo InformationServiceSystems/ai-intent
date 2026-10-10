@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.domain import Domain, get_domain, load_domain, set_domain  # noqa: E402
 from agents.orchestrator import run as orchestrator_run, OrchestrationResult  # noqa: E402
-from agents.compliance import quantifiable_contributors  # noqa: E402
+from agents.compliance import gate_mode, quantifiable_contributors  # noqa: E402
 from mcp.logger import get_logger  # noqa: E402
 from mcp.gufo_export import export_session_graph  # noqa: E402
 from evaluation.sparql_checks import run_checks  # noqa: E402
@@ -52,6 +52,7 @@ def persist_session(tc_id: str, session_id: str, messages: list, result: Any, pr
             "tc_id": tc_id,
             "session_id": session_id,
             "domain": get_domain().domain_id,
+            "gate_mode": gate_mode(),
             "orchestration_result": result.model_dump(),
             "mcp_log": [m.model_dump() for m in messages],
         }, f, indent=1, default=str)
@@ -513,6 +514,7 @@ def run_test_case(tc: dict, output_prefix: str = "") -> dict[str, Any]:
         ],
         "containment_all_ok": all(c["contained"] for c in result.containment_checks),
         "routing_mode": "override" if DETERMINISTIC_ROUTING else "model",
+        "gate_mode": gate_mode(),
         "state_label": (result.state_snapshot or {}).get("label"),
     }
 
@@ -719,6 +721,7 @@ def _write_single_run(all_results: list[dict], run_ts: str, run_index: int, out_
         "domain": get_domain().domain_id,
         "model": default_model(),
         "routing_mode": "override" if DETERMINISTIC_ROUTING else "model",
+        "gate_mode": gate_mode(),
         "total_test_cases": len(all_results),
         "results": all_results,
         "dimension_summary": dim_summary,
@@ -929,7 +932,7 @@ def main() -> None:
         print(f"DRY RUN: running {len(cases)} cases ({', '.join(tc['tc_id'] for tc in cases)})")
     else:
         print(f"FULL RUN: {len(cases)} test cases x {n_runs} run(s)")
-    print(f"DOMAIN: {domain.domain_id} | MODEL: {default_model()}")
+    print(f"DOMAIN: {domain.domain_id} | MODEL: {default_model()} | GATE: {gate_mode()}")
 
     out_dir = Path(__file__).parent
     all_run_outputs: list[dict] = []

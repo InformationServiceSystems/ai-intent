@@ -3,9 +3,10 @@
 # with llama3.1:8b (continuity with ER 2026) and llama3.3:70b (ROADMAP 3.1).
 # Usage: sh scripts/hpc/campaign.sh   (after the tunnel is open and both models are pulled)
 #        MODELS=llama3.1:8b sh scripts/hpc/campaign.sh   (one model only)
+#        GATE_MODE=observe PREFIX=abl sh scripts/hpc/campaign.sh   (prompt-only ablation: the gate logs but never revises or blocks)
 set -u
 cd "$(dirname "$0")/../.."
-export AI_INTENT_CASE_PAUSE=2 PYTHONUNBUFFERED=1
+export AI_INTENT_CASE_PAUSE=2 PYTHONUNBUFFERED=1 AI_INTENT_GATE_MODE=${GATE_MODE:-enforce}
 BASE=http://localhost:11435/v1
 for model in ${MODELS:-llama3.1:8b llama3.3:70b}; do
   tag=$(echo "$model" | sed 's/llama3.1:8b/m8/; s/llama3.3:70b/m70/; s/qwen2.5:72b/q72/')
@@ -14,7 +15,7 @@ for model in ${MODELS:-llama3.1:8b llama3.3:70b}; do
     curl -s --max-time 3000 http://localhost:11435/api/pull -d "{\"name\":\"$model\",\"stream\":false}" | grep -q success || { echo "pull $model failed"; exit 1; }
   fi
   for domain in ${DOMAINS:-finance procurement}; do
-    echo "=== $model $domain $(date)"
+    echo "=== $model $domain gate=$AI_INTENT_GATE_MODE $(date)"
     LLM_MODEL=$model python3 evaluation/run_parallel.py --workers 10 --prefix "${PREFIX:-c4}_${tag}_${domain}" \
       --base-url "$BASE" --deterministic-routing --domain "$domain" ${CASES:+--cases "$CASES"}
   done
